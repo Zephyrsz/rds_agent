@@ -1,0 +1,62 @@
+# 维度定义
+# 定义业务维度及其映射关系
+
+dimensions:
+  region:
+    name: 地区
+    description: 客户所在地区
+    table: regions
+    column: region_name
+    mappings:
+      华东:
+        - EAST_CHINA
+      华北:
+        - NORTH_CHINA
+      华南:
+        - SOUTH_CHINA
+      西南:
+        - SOUTHWEST_CHINA
+
+  product_category:
+    name: 产品类别
+    description: 产品所属类别
+    table: products
+    column: category
+    mappings:
+      电子:
+        - 电子产品
+      家居:
+        - 家居用品
+      服装:
+        - 服装
+      食品:
+        - 食品
+
+  order_status:
+    name: 订单状态
+    description: 订单当前状态
+    table: orders
+    column: status
+    mappings:
+      待支付:
+        - pending
+      已支付:
+        - paid
+      已完成:
+        - completed
+      已取消:
+        - cancelled
+
+  customer:
+    name: 客户
+    description: 客户维度
+    table: customers
+    column: name
+    mappings:
+
+  product:
+    name: 产品
+    description: 产品维度
+    table: products
+    column: name
+    mappings: {}

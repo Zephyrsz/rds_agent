@@ -1,0 +1,97 @@
+# 业务术语和同义词定义
+# 帮助系统理解用户的各种表达方式
+
+terms:
+  sales_amount:
+    standard_name: 销售额
+    synonyms:
+      - 销售金额
+      - 营收
+      - 收入
+      - 成交额
+      - sales
+      - revenue
+
+  order_count:
+    standard_name: 订单数
+    synonyms:
+      - 订单量
+      - 订单数量
+      - 成交单数
+      - orders
+      - order count
+
+  customer_count:
+    standard_name: 客户数
+    synonyms:
+      - 客户量
+      - 客户数量
+      - 用户数
+      - customers
+      - users
+
+  region:
+    standard_name: 地区
+    synonyms:
+      - 区域
+      - 省份
+      - 地方
+      - location
+      - area
+
+  product_category:
+    standard_name: 产品类别
+    synonyms:
+      - 品类
+      - 类目
+      - 分类
+      - category
+
+  order_status:
+    standard_name: 订单状态
+    synonyms:
+      - 状态
+      - status
+
+  time_period:
+    standard_name: 时间段
+    synonyms:
+      - 时间范围
+      - 周期
+      - 时期
+      - period
+
+  trend:
+    standard_name: 趋势
+    synonyms:
+      - 变化
+      - 走势
+      - 发展
+      - 动态
+      - trend
+
+  comparison:
+    standard_name: 对比
+    synonyms:
+      - 比较
+      - 对照
+      - vs
+      - compare
+
+  growth:
+    standard_name: 增长
+    synonyms:
+      - 增加
+      - 提升
+      - 上升
+      - growth
+      - increase
+
+  decline:
+    standard_name: 下降
+    synonyms:
+      - 减少
+      - 降低
+      - 下跌
+      - decline
+      - decrease

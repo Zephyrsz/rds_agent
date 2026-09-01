@@ -1,0 +1,123 @@
+# 示例问题和 SQL
+# 提供高质量的示例，帮助模型生成更准确的 SQL
+
+examples:
+  - question: 最近一个月的总销售额是多少？
+    intent:
+      question_type: simple_query
+      metrics: [sales_amount]
+      time_range: 最近一个月
+    sql: |
+      SELECT
+        SUM(oi.net_amount) AS sales_amount
+      FROM orders o
+      JOIN order_items oi ON o.id = oi.order_id
+      WHERE o.status IN ('paid', 'completed')
+        AND o.paid_at >= CURRENT_DATE - INTERVAL '1 month'
+      LIMIT 1000;
+
+  - question: 华东地区的订单数有多少？
+    intent:
+      question_type: simple_query
+      metrics: [order_count]
+      dimensions: [region]
+      filters:
+        region: 华东
+    sql: |
+      SELECT
+        r.region_name,
+        COUNT(DISTINCT o.id) AS order_count
+      FROM orders o
+      JOIN customers c ON o.customer_id = c.id
+      JOIN regions r ON c.region_id = r.id
+      WHERE o.status IN ('paid', 'completed')
+        AND r.region_code = 'EAST_CHINA'
+      GROUP BY r.region_name
+      LIMIT 1000;
+
+  - question: 各个地区的销售额分别是多少？
+    intent:
+      question_type: simple_query
+      metrics: [sales_amount]
+      dimensions: [region]
+    sql: |
+      SELECT
+        r.region_name,
+        SUM(oi.net_amount) AS sales_amount
+      FROM orders o
+      JOIN order_items oi ON o.id = oi.order_id
+      JOIN customers c ON o.customer_id = c.id
+      JOIN regions r ON c.region_id = r.id
+      WHERE o.status IN ('paid', 'completed')
+      GROUP BY r.region_name
+      ORDER BY sales_amount DESC
+      LIMIT 1000;
+
+  - question: 最近三个月每个月的销售额趋势
+    intent:
+      question_type: trend
+      metrics: [sales_amount]
+      dimensions: [time_period]
+      time_range: 最近三个月
+    sql: |
+      SELECT
+        DATE_TRUNC('month', o.paid_at) AS month,
+        SUM(oi.net_amount) AS sales_amount
+      FROM orders o
+      JOIN order_items oi ON o.id = oi.order_id
+      WHERE o.status IN ('paid', 'completed')
+        AND o.paid_at >= CURRENT_DATE - INTERVAL '3 months'
+      GROUP BY DATE_TRUNC('month', o.paid_at)
+      ORDER BY month
+      LIMIT 1000;
+
+  - question: 各产品类别的销售额排名
+    intent:
+      question_type: simple_query
+      metrics: [sales_amount]
+      dimensions: [product_category]
+    sql: |
+      SELECT
+        p.category,
+        SUM(oi.net_amount) AS sales_amount
+      FROM order_items oi
+      JOIN products p ON oi.product_id = p.id
+      JOIN orders o ON oi.order_id = o.id
+      WHERE o.status IN ('paid', 'completed')
+      GROUP BY p.category
+      ORDER BY sales_amount DESC
+      LIMIT 1000;
+
+  - question: TOP 5 销售额最高的客户
+    intent:
+      question_type: simple_query
+      metrics: [sales_amount]
+      dimensions: [customer]
+    sql: |
+      SELECT
+        c.name AS customer_name,
+        SUM(oi.net_amount) AS sales_amount
+      FROM orders o
+      JOIN order_items oi ON o.id = oi.order_id
+      JOIN customers c ON o.customer_id = c.id
+      WHERE o.status IN ('paid', 'completed')
+      GROUP BY c.name
+      ORDER BY sales_amount DESC
+      LIMIT 5;
+
+  - question: 今年和去年同期的销售额对比
+    intent:
+      question_type: comparison
+      metrics: [sales_amount]
+      time_range: 今年 vs 去年
+    sql: |
+      SELECT
+        EXTRACT(YEAR FROM o.paid_at) AS year,
+        SUM(oi.net_amount) AS sales_amount
+      FROM orders o
+      JOIN order_items oi ON o.id = oi.order_id
+      WHERE o.status IN ('paid', 'completed')
+        AND o.paid_at >= CURRENT_DATE - INTERVAL '2 years'
+      GROUP BY EXTRACT(YEAR FROM o.paid_at)
+      ORDER BY year
+      LIMIT 1000;

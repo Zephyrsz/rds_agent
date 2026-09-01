@@ -1,0 +1,127 @@
+# 数据库 Schema 配置
+# 定义数据库表结构、字段说明、主外键关系等
+
+tables:
+  customers:
+    description: 客户主表，存储客户基本信息
+    tags: [customer, user]
+    columns:
+      id:
+        type: INTEGER
+        description: 客户唯一标识
+        primary_key: true
+      name:
+        type: VARCHAR
+        description: 客户名称
+      region_id:
+        type: INTEGER
+        description: 所属地区ID
+        foreign_key: regions.id
+      created_at:
+        type: TIMESTAMP
+        description: 客户创建时间
+
+  regions:
+    description: 地区表，存储地区信息
+    tags: [region, location]
+    columns:
+      id:
+        type: INTEGER
+        description: 地区唯一标识
+        primary_key: true
+      region_name:
+        type: VARCHAR
+        description: 地区名称
+      region_code:
+        type: VARCHAR
+        description: 地区代码
+        enum: ['EAST_CHINA', 'NORTH_CHINA', 'SOUTH_CHINA', 'SOUTHWEST_CHINA']
+
+  products:
+    description: 产品表，存储产品信息
+    tags: [product, item]
+    columns:
+      id:
+        type: INTEGER
+        description: 产品唯一标识
+        primary_key: true
+      name:
+        type: VARCHAR
+        description: 产品名称
+      category:
+        type: VARCHAR
+        description: 产品类别
+      price:
+        type: DECIMAL
+        description: 产品价格
+
+  orders:
+    description: 订单主表，存储订单头信息
+    tags: [order, transaction]
+    columns:
+      id:
+        type: INTEGER
+        description: 订单唯一标识
+        primary_key: true
+      customer_id:
+        type: INTEGER
+        description: 客户ID
+        foreign_key: customers.id
+      status:
+        type: VARCHAR
+        description: 订单状态
+        enum: ['pending', 'paid', 'completed', 'cancelled']
+      order_date:
+        type: TIMESTAMP
+        description: 下单时间
+      paid_at:
+        type: TIMESTAMP
+        description: 支付时间
+
+  order_items:
+    description: 订单明细表，存储订单商品明细
+    tags: [order_item, line_item]
+    columns:
+      id:
+        type: INTEGER
+        description: 明细唯一标识
+        primary_key: true
+      order_id:
+        type: INTEGER
+        description: 订单ID
+        foreign_key: orders.id
+      product_id:
+        type: INTEGER
+        description: 产品ID
+        foreign_key: products.id
+      quantity:
+        type: INTEGER
+        description: 购买数量
+      unit_price:
+        type: DECIMAL
+        description: 单价
+      net_amount:
+        type: DECIMAL
+        description: 净金额（不含税）
+
+# Join 关系定义
+joins:
+  - left: orders.customer_id
+    right: customers.id
+    cardinality: many_to_one
+    description: 订单关联客户
+
+  - left: customers.region_id
+    right: regions.id
+    cardinality: many_to_one
+    description: 客户关联地区
+
+  - left: order_items.order_id
+    right: orders.id
+    cardinality: many_to_one
+    description: 订单明细关联订单
+
+  - left: order_items.product_id
+    right: products.id
+    cardinality: many_to_one
+    description: 订单明细关联产品

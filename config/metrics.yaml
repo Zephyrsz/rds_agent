@@ -1,0 +1,65 @@
+# 业务指标定义
+# 定义业务指标的计算方式、涉及的表、默认过滤条件等
+
+metrics:
+  sales_amount:
+    name: 销售额
+    description: 有效订单的净销售额（不含退款和取消订单）
+    expression: SUM(order_items.net_amount)
+    tables:
+      - orders
+      - order_items
+    filters:
+      - orders.status IN ('paid', 'completed')
+    time_column: orders.paid_at
+
+  order_count:
+    name: 订单数
+    description: 有效订单数量
+    expression: COUNT(DISTINCT orders.id)
+    tables:
+      - orders
+    filters:
+      - orders.status IN ('paid', 'completed')
+    time_column: orders.order_date
+
+  customer_count:
+    name: 客户数
+    description: 去重客户数量
+    expression: COUNT(DISTINCT customers.id)
+    tables:
+      - customers
+    filters: []
+    time_column: customers.created_at
+
+  avg_order_amount:
+    name: 平均订单金额
+    description: 平均每单金额
+    expression: AVG(order_items.net_amount)
+    tables:
+      - orders
+      - order_items
+    filters:
+      - orders.status IN ('paid', 'completed')
+    time_column: orders.paid_at
+
+  product_sales:
+    name: 产品销量
+    description: 产品销售数量
+    expression: SUM(order_items.quantity)
+    tables:
+      - order_items
+      - orders
+    filters:
+      - orders.status IN ('paid', 'completed')
+    time_column: orders.paid_at
+
+  gmv:
+    name: GMV
+    description: 成交总额（包含所有状态订单）
+    expression: SUM(order_items.net_amount)
+    tables:
+      - orders
+      - order_items
+    filters: []
+    time_column: orders.order_date
