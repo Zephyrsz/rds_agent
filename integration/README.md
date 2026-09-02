@@ -6,7 +6,8 @@
 
 | 文件 | 集成方式 | 适用场景 |
 |------|---------|---------|
-| `mcp_server.py` | MCP Server | Claude Desktop, Hermes Agent (支持 MCP) |
+| `mcp_server.py` | MCP Server | DeepSeek Harness 等支持 MCP 的 Agent |
+| `deepseek-harness.cordis.yml` | Harness 配置 | 以 stdio 子进程挂载 MCP Server |
 | `rest_api.py` | RESTful API | 任何支持 HTTP 的 Agent |
 | `langchain_tool.py` | LangChain Tool | 基于 LangChain 的 Agent |
 | `function_calling.py` | Function Calling | OpenAI/Anthropic 原生 Agent |
@@ -17,14 +18,25 @@
 ### 1. MCP Server
 
 ```bash
-# 安装 MCP SDK
-pip install mcp
-
-# 运行 MCP Server
-python integration/mcp_server.py
+python3 -m venv venv
+venv/bin/pip install -r requirements.txt
+export OPENAI_API_KEY=your_api_key
+venv/bin/python -m integration.mcp_server
 ```
 
-配置 Claude Desktop 或 Hermes Agent 连接到此 MCP Server。
+Server 只暴露 `query_data(question)`。该工具执行完整 RDS 工作流并返回 SQL、最多 20 行数据预览、行数、执行时间和警告。业务查询失败会返回 MCP tool error。
+
+在 DeepSeek Harness 中启用：
+
+```bash
+export RDS_AGENT_ROOT=/Users/rgwei/pj/pj_data/rds_agent
+export DEEPSEEK_API_KEY=your_api_key
+
+cd /Users/rgwei/pj/pj_agent/deepseek-harness
+pnpm dsh --profile web --patch "$RDS_AGENT_ROOT/integration/deepseek-harness.cordis.yml"
+```
+
+Harness 将工具注册为 `mcp__rds__query_data`。配置默认连接 DeepSeek API 并使用 `deepseek-chat`；可通过 `RDS_LLM_API_KEY`、`RDS_LLM_BASE_URL`、`RDS_LLM_MODEL` 和 `RDS_DB_PATH` 覆盖。省略 `RDS_DB_PATH` 时使用内存示例数据库。
 
 ### 2. RESTful API
 
@@ -220,7 +232,7 @@ A:
 A: 
 - RESTful API: 使用异步任务 + 轮询
 - Python SDK: 使用 `aquery` 异步方法
-- MCP Server: 支持流式响应
+- MCP Server: 当前为一个同步的粗粒度工具调用
 
 ### Q: 如何提高性能？
 

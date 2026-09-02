@@ -5,6 +5,7 @@ DuckDB Adapter for RDS Agent
 from typing import Optional, Any
 import duckdb
 from pathlib import Path
+import sys
 
 
 class DuckDBAdapter:
@@ -203,12 +204,13 @@ def create_sample_database(db_path: str = ":memory:") -> DuckDBAdapter:
         (14, 10, 4, 2, 199.00, 398.00)
     """)
 
-    print("✓ 示例数据库创建完成")
-    print(f"  - 地区: 4 条记录")
-    print(f"  - 客户: 5 条记录")
-    print(f"  - 产品: 5 条记录")
-    print(f"  - 订单: 10 条记录")
-    print(f"  - 订单明细: 14 条记录")
+    # Keep diagnostics off stdout so stdio MCP transports remain pure JSON-RPC.
+    print("✓ 示例数据库创建完成", file=sys.stderr)
+    print("  - 地区: 4 条记录", file=sys.stderr)
+    print("  - 客户: 5 条记录", file=sys.stderr)
+    print("  - 产品: 5 条记录", file=sys.stderr)
+    print("  - 订单: 10 条记录", file=sys.stderr)
+    print("  - 订单明细: 14 条记录", file=sys.stderr)
 
     return adapter
 

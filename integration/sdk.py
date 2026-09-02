@@ -187,8 +187,16 @@ class RDSAgent:
                 )
 
             # 提取结果
-            query_result = final_state.get("query_result", {})
-            answer = final_state.get("answer", {})
+            query_result = final_state.get("query_result")
+            if not isinstance(query_result, dict):
+                return QueryResult(
+                    success=False,
+                    question=question,
+                    sql=final_state.get("sql"),
+                    error="工作流未返回查询结果",
+                )
+
+            answer = final_state.get("answer") or {}
 
             return QueryResult(
                 success=True,
@@ -234,8 +242,16 @@ class RDSAgent:
                 )
 
             # 提取结果
-            query_result = final_state.get("query_result", {})
-            answer = final_state.get("answer", {})
+            query_result = final_state.get("query_result")
+            if not isinstance(query_result, dict):
+                return QueryResult(
+                    success=False,
+                    question=question,
+                    sql=final_state.get("sql"),
+                    error="工作流未返回查询结果",
+                )
+
+            answer = final_state.get("answer") or {}
 
             return QueryResult(
                 success=True,

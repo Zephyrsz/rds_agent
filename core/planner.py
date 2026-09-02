@@ -25,7 +25,7 @@ class QueryStep:
         step_id: str,
         purpose: str,
         query_type: str = "data",
-        depends_on: Optional<List[str]] = None,
+        depends_on: Optional[List[str]] = None,
         metrics: Optional[List[str]] = None,
         dimensions: Optional[List[str]] = None,
         filters: Optional[Dict] = None,

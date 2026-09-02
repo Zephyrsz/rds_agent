@@ -1,0 +1,17 @@
+# Opt-in DeepSeek Harness overlay for the local RDS Agent MCP server.
+- insert:
+    - id: rds-agent-mcp
+      name: '@deepseek-ai/dsh-mcp-client'
+      config:
+        serverName: rds
+        transport: stdio
+        command: ./venv/bin/python
+        args: [-m, integration.mcp_server]
+        cwd: !!js process.env.RDS_AGENT_ROOT
+        env:
+          OPENAI_API_KEY: !!js process.env.RDS_LLM_API_KEY || process.env.DEEPSEEK_API_KEY
+          OPENAI_API_BASE: !!js process.env.RDS_LLM_BASE_URL || process.env.DEEPSEEK_BASE_URL || 'https://api.deepseek.com'
+          RDS_LLM_MODEL: !!js process.env.RDS_LLM_MODEL || 'deepseek-chat'
+          RDS_DB_PATH: !!js process.env.RDS_DB_PATH || ':memory:'
+        toolCallTimeoutMs: 120000
+        failOnStartupError: true

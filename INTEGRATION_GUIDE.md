@@ -19,19 +19,19 @@
 
 ### 方案 1: MCP Server（最推荐）⭐⭐⭐⭐⭐
 
-**适用场景**: Claude Desktop、Hermes Agent 等支持 MCP 的 Agent
+**适用场景**: DeepSeek Harness 等支持 MCP 的 Agent
 
 **优势**:
 - 官方标准协议，生态支持好
 - 可以传递丰富的上下文信息
-- 支持流式响应
+- 只暴露一个粗粒度查询工具
 - 支持工具发现和动态调用
 
 **实现步骤**:
 1. 创建 MCP Server 实现
 2. 定义工具 schema
 3. 处理工具调用请求
-4. 返回结构化响应
+4. 返回有上限的文本结果
 
 详见: `integration/mcp_server.py`
 
@@ -126,8 +126,6 @@
 │  (本项目封装)    │
 ├─────────────────┤
 │ - query_data    │
-│ - get_schema    │
-│ - get_metrics   │
 └────────┬────────┘
          │
          ↓
@@ -200,7 +198,7 @@ RDS Agent
     ↓
 MCP Server
     → 格式化响应
-    → 返回结构化数据
+    → 返回文本结果
     ↓
 Hermes Agent
     → 接收结果

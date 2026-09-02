@@ -27,6 +27,28 @@ def test_valid_select(guard):
     assert error is None
 
 
+def test_valid_aggregate_select(guard):
+    """聚合函数名不应被误判为表名。"""
+    sql = """
+    SELECT SUM(orders.id) AS total_sales
+    FROM orders
+    LIMIT 1000
+    """
+    is_valid, error = guard.validate_sql(sql)
+    assert is_valid, error
+
+
+def test_derived_table_alias_is_not_treated_as_a_table(guard):
+    """A derived-table alias must not be checked against the table allowlist."""
+    sql = """
+    SELECT *
+    FROM (SELECT * FROM orders LIMIT 100) AS recent_orders
+    LIMIT 100
+    """
+    is_valid, error = guard.validate_sql(sql)
+    assert is_valid, error
+
+
 def test_forbidden_insert(guard):
     """测试禁止的 INSERT 操作"""
     sql = "INSERT INTO orders VALUES (1, 'test')"

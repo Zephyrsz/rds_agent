@@ -42,7 +42,7 @@ class DimensionDefinition:
         display_name: str,
         table: str,
         column: str,
-        mappings: Optional<Dict[str, List[str]]] = None,
+        mappings: Optional[Dict[str, List[str]]] = None,
     ):
         self.name = name
         self.display_name = display_name
@@ -344,14 +344,16 @@ class SemanticLayer:
                 intent["dimensions"].append(dim_name)
 
         # 识别时间范围
-        time_keywords = ['最近', '本月', '上月', '今年', 'last', 'this month', 'this year']
-        for keyword in time_keywords:
-            if keyword in question_lower:
-                # 提取包含时间关键词的片段
-                time_match = re.search(r'(\S*' + re.escape(keyword) + r'\S*\s+\d+\S*)', question, re.IGNORECASE)
-                if time_match:
-                    intent["time_range"] = time_match.group(1)
-                    break
+        time_patterns = [
+            r'最近\s*(?:\d+|[一二三四五六七八九十]+)\s*(?:天|周|个?月|年)',
+            r'last\s+\d+\s+(?:day|week|month|year)s?',
+            r'本月|上月|今年|this month|last month|this year',
+        ]
+        for pattern in time_patterns:
+            time_match = re.search(pattern, question, re.IGNORECASE)
+            if time_match:
+                intent["time_range"] = time_match.group(0)
+                break
 
         # 识别问题类型
         if any(word in question_lower for word in ['对比', '比较', 'compare', 'vs']):

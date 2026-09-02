@@ -39,6 +39,7 @@ class QueryResult:
         return {
             "query_id": self.query_id,
             "sql": self.sql,
+            "rows": self.rows,
             "row_count": self.row_count,
             "execution_time": self.execution_time,
             "columns": self.columns,

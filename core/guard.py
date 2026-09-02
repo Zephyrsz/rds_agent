@@ -7,7 +7,7 @@ SQLGuard: SQL 安全网关
 from typing import Dict, List, Optional, Set, Tuple
 import re
 import sqlparse
-from sqlparse.sql import Token, TokenList, Identifier, Function
+from sqlparse.sql import Token, TokenList, Identifier, IdentifierList, Function, Parenthesis
 from sqlparse.tokens import Keyword, DML, DDL
 
 
@@ -164,7 +164,7 @@ class SQLGuard:
             raise SQLValidationError("无法识别 SQL 语句类型", "unknown_statement_type")
 
         # 检查是否为 SELECT
-        if first_token.ttype is not Keyword or first_token.normalized.upper() != 'SELECT':
+        if first_token.ttype is not DML or first_token.normalized.upper() != 'SELECT':
             raise SQLValidationError(
                 f"只允许 SELECT 查询，不允许 {first_token.normalized}",
                 "forbidden_statement_type",
@@ -188,35 +188,47 @@ class SQLGuard:
         """提取 SQL 中涉及的表"""
         tables = set()
 
-        # 简化实现：查找 FROM 和 JOIN 后的标识符
-        from_seen = False
-        join_seen = False
+        # Only inspect the relation immediately following FROM/JOIN. Looking at
+        # every Identifier also sees SELECT expressions such as ``SUM(...)``
+        # and aliases, which are not table names.
+        def add_relation(token: TokenList) -> None:
+            if isinstance(token, IdentifierList):
+                for identifier in token.get_identifiers():
+                    add_relation(identifier)
+                return
 
-        for token in statement.flatten():
-            if token.ttype is Keyword:
-                keyword = token.normalized.upper()
-                if keyword == 'FROM':
-                    from_seen = True
-                    join_seen = False
-                elif keyword in ('JOIN', 'INNER JOIN', 'LEFT JOIN', 'RIGHT JOIN', 'FULL JOIN'):
-                    join_seen = True
-                    from_seen = False
-                elif keyword in ('WHERE', 'GROUP', 'ORDER', 'HAVING', 'LIMIT'):
-                    from_seen = False
-                    join_seen = False
-
-            # 在 FROM 或 JOIN 之后查找表名
-            if (from_seen or join_seen) and token.ttype is None:
-                table_name = token.value.strip('`"[]').split('.')[0]  # 处理 schema.table 格式
-                if table_name and not token.is_keyword:
-                    tables.add(table_name.lower())
-
-        # 使用 sqlparse 的标识符提取（更可靠但可能更复杂）
-        for token in statement.tokens:
             if isinstance(token, Identifier):
-                table_name = str(token.get_real_name())
-                if table_name:
-                    tables.add(table_name.lower())
+                derived_table = any(isinstance(child, Parenthesis) for child in token.tokens)
+                if not derived_table:
+                    table_name = token.get_real_name()
+                    if table_name:
+                        tables.add(table_name.lower())
+                else:
+                    # A derived-table alias is not a physical table; inspect
+                    # the nested query for its underlying relations instead.
+                    for child in token.tokens:
+                        if isinstance(child, Parenthesis):
+                            collect_relations(child)
+                return
+
+            if isinstance(token, Parenthesis):
+                collect_relations(token)
+
+        def collect_relations(container: TokenList) -> None:
+            expect_relation = False
+            for token in container.tokens:
+                if token.is_whitespace:
+                    continue
+                if token.ttype is Keyword:
+                    keyword = token.normalized.upper()
+                    if keyword == 'FROM' or keyword == 'JOIN' or keyword.endswith(' JOIN'):
+                        expect_relation = True
+                        continue
+                if expect_relation:
+                    add_relation(token)
+                    expect_relation = False
+
+        collect_relations(statement)
 
         return tables
 
