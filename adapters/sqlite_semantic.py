@@ -7,6 +7,7 @@ maintaining 100% API compatibility while using SQLite for storage.
 
 import sqlite3
 import json
+import re
 from pathlib import Path
 from typing import List, Dict, Any, Optional
 from dataclasses import dataclass
@@ -35,7 +36,7 @@ class SQLiteSemanticLayer:
         >>> dimension = semantic.resolve_dimension("region")
     """
 
-    def __init__(self, db_path: str):
+    def __init__(self, db_path: str, reference_date=None):
         """
         Initialize SQLite semantic layer.
 
@@ -43,8 +44,10 @@ class SQLiteSemanticLayer:
             db_path: Path to SQLite database file
         """
         self.db_path = db_path
+        self.reference_date = reference_date
         self.connection = sqlite3.connect(db_path, check_same_thread=False)
         self.connection.row_factory = sqlite3.Row
+        self._ensure_schema()
 
         # Cache for performance
         self._metrics_cache: Dict[str, MetricDefinition] = {}
@@ -53,6 +56,23 @@ class SQLiteSemanticLayer:
         self._all_dimensions_cache: Optional[List[DimensionDefinition]] = None
 
         logger.info(f"SQLiteSemanticLayer initialized with database: {db_path}")
+
+    def _ensure_schema(self):
+        schema_file = Path(__file__).parent / "sqlite_schema.sql"
+        if schema_file.exists():
+            self.connection.executescript(schema_file.read_text(encoding="utf-8"))
+            additions = {
+                "tables": {"grain": "TEXT", "entities": "TEXT"},
+                "joins": {"name": "TEXT", "auto_join": "BOOLEAN DEFAULT TRUE", "priority": "INTEGER DEFAULT 100", "fan_out_risk": "BOOLEAN DEFAULT FALSE", "temporal_validity": "TEXT"},
+                "dimensions": {"dimension_type": "TEXT DEFAULT 'categorical'", "granularities": "TEXT", "filter_column": "TEXT"},
+                "metrics": {"metric_type": "TEXT DEFAULT 'simple'", "numerator": "TEXT", "denominator": "TEXT", "base_measure": "TEXT", "comparison": "TEXT", "format": "TEXT", "certification": "TEXT DEFAULT 'draft'", "valid_dimensions": "TEXT"},
+            }
+            for table, columns in additions.items():
+                existing = {row[1] for row in self.connection.execute(f"PRAGMA table_info({table})")}
+                for name, definition in columns.items():
+                    if name not in existing:
+                        self.connection.execute(f"ALTER TABLE {table} ADD COLUMN {name} {definition}")
+            self.connection.commit()
 
     def resolve_metric(self, metric_name: str) -> Optional[MetricDefinition]:
         """
@@ -76,6 +96,11 @@ class SQLiteSemanticLayer:
 
         row = cursor.fetchone()
         if not row:
+            canonical = self._canonical_name(metric_name, "metrics")
+            if canonical:
+                cursor.execute("SELECT * FROM metrics WHERE name = ? AND active = TRUE", (canonical,))
+                row = cursor.fetchone()
+        if not row:
             logger.warning(f"Metric not found: {metric_name}")
             return None
 
@@ -91,6 +116,14 @@ class SQLiteSemanticLayer:
             data_type=row["data_type"],
             min_value=row["min_value"],
             max_value=row["max_value"],
+            metric_type=row["metric_type"] or "simple",
+            numerator=row["numerator"],
+            denominator=row["denominator"],
+            base_measure=row["base_measure"],
+            comparison=row["comparison"],
+            format=row["format"],
+            certification=row["certification"] or "draft",
+            valid_dimensions=json.loads(row["valid_dimensions"] or "[]"),
         )
 
         # Cache it
@@ -121,6 +154,11 @@ class SQLiteSemanticLayer:
 
         row = cursor.fetchone()
         if not row:
+            canonical = self._canonical_name(dim_name, "dimensions")
+            if canonical:
+                cursor.execute("SELECT * FROM dimensions WHERE name = ? AND active = TRUE", (canonical,))
+                row = cursor.fetchone()
+        if not row:
             logger.warning(f"Dimension not found: {dim_name}")
             return None
 
@@ -130,6 +168,9 @@ class SQLiteSemanticLayer:
             table=row["table_name"],
             column=row["column_name"],
             mappings=json.loads(row["mappings"]) if row["mappings"] else {},
+            dimension_type=row["dimension_type"] or "categorical",
+            granularities=json.loads(row["granularities"] or "[]"),
+            filter_column=(row["filter_column"] or row["column_name"]),
         )
 
         # Cache it
@@ -137,6 +178,20 @@ class SQLiteSemanticLayer:
 
         logger.debug(f"Resolved dimension: {dim_name}")
         return dim_def
+
+    def resolve_dimension_value(self, dimension_name: str, value: str) -> Optional[str]:
+        """Return a safe SQL predicate for a semantic dimension value."""
+        dim = self.resolve_dimension(dimension_name)
+        if dim is None:
+            return None
+        values = dim.mappings.get(value, [value])
+        if not isinstance(values, (list, tuple)):
+            values = [values]
+        quote = lambda item: "'" + str(item).replace("'", "''") + "'"
+        column = f"{dim.table}.{dim.filter_column}"
+        if len(values) == 1:
+            return f"{column} = {quote(values[0])}"
+        return f"{column} IN ({', '.join(quote(item) for item in values)})"
 
     def resolve_business_term(self, term: str) -> List[str]:
         """
@@ -158,7 +213,7 @@ class SQLiteSemanticLayer:
 
         row = cursor.fetchone()
         if row:
-            synonyms = json.loads(row["synonyms"])
+            synonyms = json.loads(row["synonyms"] or "[]")
             logger.debug(f"Resolved term '{term}' to {len(synonyms)} values")
             return synonyms
 
@@ -170,7 +225,7 @@ class SQLiteSemanticLayer:
 
         for row in cursor.fetchall():
             if row["mappings"]:
-                mappings = json.loads(row["mappings"])
+                mappings = json.loads(row["mappings"]) or {}
                 if term in mappings:
                     values = mappings[term]
                     logger.debug(f"Resolved term '{term}' via dimension mapping")
@@ -179,6 +234,75 @@ class SQLiteSemanticLayer:
         # No resolution found, return as-is
         logger.debug(f"Term '{term}' not found, returning as-is")
         return [term]
+
+    def _canonical_name(self, name: str, target_table: str) -> Optional[str]:
+        """Resolve a metric/dimension name through the normalized terms table."""
+        needle = str(name).strip().lower()
+        cursor = self.connection.cursor()
+        cursor.execute("SELECT term, standard_name, synonyms FROM terms WHERE active = TRUE")
+        for row in cursor.fetchall():
+            candidates = [row["term"], row["standard_name"]]
+            candidates.extend(json.loads(row["synonyms"] or "[]"))
+            if any(str(candidate).strip().lower() == needle for candidate in candidates if candidate):
+                canonical = row["term"]
+                cursor.execute(f"SELECT name FROM {target_table} WHERE name = ? AND active = TRUE", (canonical,))
+                match = cursor.fetchone()
+                if match:
+                    return match["name"]
+        return None
+
+    def resolve_filter(self, filter_name: str):
+        from core.semantic import FilterDefinition
+
+        cursor = self.connection.cursor()
+        cursor.execute("SELECT * FROM filters WHERE name = ? AND active = TRUE", (filter_name,))
+        row = cursor.fetchone()
+        if not row:
+            needle = str(filter_name).strip().lower()
+            cursor.execute("SELECT * FROM filters WHERE active = TRUE")
+            for candidate in cursor.fetchall():
+                aliases = [candidate["name"], candidate["display_name"]]
+                aliases.extend(json.loads(candidate["synonyms"] or "[]"))
+                if needle in {str(alias).strip().lower() for alias in aliases if alias}:
+                    row = candidate
+                    break
+        if not row:
+            return None
+        return FilterDefinition(
+            name=row["name"], display_name=row["display_name"], expression=row["expression"],
+            description=row["description"] or "", applies_to=json.loads(row["applies_to"] or "[]"),
+            synonyms=json.loads(row["synonyms"] or "[]"),
+        )
+
+    def resolve_domain(self, domain_name: str):
+        from core.semantic import DomainDefinition
+
+        row = self.connection.execute(
+            "SELECT * FROM domains WHERE name = ? AND active = TRUE", (domain_name,)
+        ).fetchone()
+        if not row:
+            return None
+        return DomainDefinition(
+            name=row["name"], display_name=row["display_name"], description=row["description"] or "",
+            allowed_tables=json.loads(row["allowed_tables"] or "[]"),
+            allowed_metrics=json.loads(row["allowed_metrics"] or "[]"),
+            default_timezone=row["default_timezone"] or "Asia/Shanghai",
+            default_currency=row["default_currency"] or "CNY",
+        )
+
+    def resolve_measure(self, measure_name: str):
+        from core.semantic import MeasureDefinition
+
+        row = self.connection.execute(
+            "SELECT * FROM measures WHERE name = ? AND active = TRUE", (measure_name,)
+        ).fetchone()
+        if not row:
+            return None
+        return MeasureDefinition(
+            name=row["name"], display_name=row["display_name"], expression=row["expression"],
+            table=row["table_name"], aggregation=row["aggregation"], data_type=row["data_type"] or "DECIMAL",
+            unit=row["unit"] or "", additive=row["additive"], time_additive=row["time_additive"],
+        )
 
     def resolve_time_range(self, expression: str) -> Dict[str, Any]:
         """
@@ -190,72 +314,52 @@ class SQLiteSemanticLayer:
         Returns:
             Dict with start_date, end_date, column
         """
-        today = datetime.now().date()
+        reference = self.reference_date or datetime.now().date()
+        today = reference.date() if isinstance(reference, datetime) else reference
 
-        # Parse common expressions
-        if "最近" in expression or "近" in expression:
-            if "天" in expression:
-                # Extract number of days
-                import re
-                match = re.search(r'(\d+)天', expression)
-                if match:
-                    days = int(match.group(1))
-                    start_date = today - timedelta(days=days)
-                    end_date = today
-            elif "周" in expression:
-                match = re.search(r'(\d+)周', expression)
-                if match:
-                    weeks = int(match.group(1))
-                    start_date = today - timedelta(weeks=weeks)
-                    end_date = today
-                else:
-                    start_date = today - timedelta(weeks=1)
-                    end_date = today
-            elif "月" in expression or "个月" in expression:
-                match = re.search(r'(\d+)个?月', expression)
-                if match:
-                    months = int(match.group(1))
-                    # Approximate: 30 days per month
-                    start_date = today - timedelta(days=30 * months)
-                    end_date = today
-                else:
-                    start_date = today - timedelta(days=30)
-                    end_date = today
-            elif "年" in expression:
-                start_date = today.replace(month=1, day=1)
-                end_date = today
+        def parse_count(text: str, default: int = 1) -> int:
+            match = re.search(r"(\d+|[一二三四五六七八九十百]+)", text)
+            if not match:
+                return default
+            token = match.group(1)
+            if token.isdigit():
+                return int(token)
+            values = {"一": 1, "二": 2, "两": 2, "三": 3, "四": 4, "五": 5, "六": 6, "七": 7, "八": 8, "九": 9, "十": 10}
+            if token == "十":
+                return 10
+            if "十" in token:
+                parts = token.split("十")
+                return (values.get(parts[0], 1) if parts[0] else 1) * 10 + (values.get(parts[1], 0) if len(parts) > 1 and parts[1] else 0)
+            return values.get(token, default)
+
+        expression_lower = expression.lower()
+        if "最近" in expression or "近" in expression or "last" in expression_lower:
+            if "天" in expression or "day" in expression_lower:
+                start_date, end_date = today - timedelta(days=parse_count(expression)), today
+            elif "周" in expression or "week" in expression_lower:
+                start_date, end_date = today - timedelta(weeks=parse_count(expression)), today
+            elif "年" in expression or "year" in expression_lower:
+                start_date, end_date = today.replace(month=1, day=1), today
             else:
-                # Default to last 7 days
-                start_date = today - timedelta(days=7)
-                end_date = today
-
-        elif "本" in expression:
-            if "周" in expression:
-                # Start of this week (Monday)
-                start_date = today - timedelta(days=today.weekday())
-                end_date = today
-            elif "月" in expression:
-                start_date = today.replace(day=1)
-                end_date = today
-            elif "年" in expression:
-                start_date = today.replace(month=1, day=1)
-                end_date = today
-            else:
-                start_date = today
-                end_date = today
-
-        elif "今天" in expression or "今日" in expression:
-            start_date = today
-            end_date = today
-
+                months = parse_count(expression)
+                month = today.month - months + 1
+                year = today.year + (month - 1) // 12
+                month = (month - 1) % 12 + 1
+                start_date, end_date = today.replace(year=year, month=month, day=1), today
+        elif "上月" in expression or "last month" in expression_lower:
+            first = today.replace(day=1)
+            end_date = first - timedelta(days=1)
+            start_date = end_date.replace(day=1)
+        elif "本周" in expression or "this week" in expression_lower:
+            start_date, end_date = today - timedelta(days=today.weekday()), today
+        elif "本月" in expression or "this month" in expression_lower:
+            start_date, end_date = today.replace(day=1), today
+        elif "今年" in expression or "this year" in expression_lower:
+            start_date, end_date = today.replace(month=1, day=1), today
         elif "昨天" in expression or "昨日" in expression:
-            start_date = today - timedelta(days=1)
-            end_date = today - timedelta(days=1)
-
+            start_date = end_date = today - timedelta(days=1)
         else:
-            # Default: last 30 days
-            start_date = today - timedelta(days=30)
-            end_date = today
+            start_date, end_date = today - timedelta(days=30), today
 
         result = {
             "start_date": start_date.isoformat(),
@@ -297,6 +401,14 @@ class SQLiteSemanticLayer:
                 data_type=row["data_type"],
                 min_value=row["min_value"],
                 max_value=row["max_value"],
+                metric_type=row["metric_type"] or "simple",
+                numerator=row["numerator"],
+                denominator=row["denominator"],
+                base_measure=row["base_measure"],
+                comparison=row["comparison"],
+                format=row["format"],
+                certification=row["certification"] or "draft",
+                valid_dimensions=json.loads(row["valid_dimensions"] or "[]"),
             ))
 
         self._all_metrics_cache = metrics
@@ -328,6 +440,9 @@ class SQLiteSemanticLayer:
                 table=row["table_name"],
                 column=row["column_name"],
                 mappings=json.loads(row["mappings"]) if row["mappings"] else {},
+                dimension_type=row["dimension_type"] or "categorical",
+                granularities=json.loads(row["granularities"] or "[]"),
+                filter_column=(row["filter_column"] or row["column_name"]),
             ))
 
         self._all_dimensions_cache = dimensions
@@ -454,20 +569,33 @@ class SQLiteSemanticLayer:
             "metrics": [],
             "dimensions": [],
             "time_range": None,
-            "filters": []
+            "filters": {},
+            "semantic_filters": [],
         }
 
         # Check for metrics
         all_metrics = self.get_all_metrics()
         for metric in all_metrics:
-            if metric.display_name in question or metric.name in question:
+            aliases = [metric.name, metric.display_name]
+            aliases.extend(self._term_aliases(metric.name))
+            if any(alias and alias.lower() in question.lower() for alias in aliases):
                 intent["metrics"].append(metric.name)
 
         # Check for dimensions
         all_dimensions = self.get_all_dimensions()
         for dim in all_dimensions:
-            if dim.display_name in question or dim.name in question:
+            aliases = [dim.name, dim.display_name]
+            aliases.extend(self._term_aliases(dim.name))
+            if any(alias and alias.lower() in question.lower() for alias in aliases):
                 intent["dimensions"].append(dim.name)
+            for label in dim.mappings:
+                if label in question:
+                    intent["filters"][dim.name] = label
+
+        for filter_name in ("valid_order",):
+            definition = self.resolve_filter(filter_name)
+            if definition and any(alias in question for alias in [definition.display_name, *definition.synonyms]):
+                intent["semantic_filters"].append(filter_name)
 
         # Check for time expressions
         time_keywords = ["最近", "近", "本", "今", "昨"]
@@ -479,6 +607,14 @@ class SQLiteSemanticLayer:
 
         logger.debug(f"Extracted intent: {intent}")
         return intent
+
+    def _term_aliases(self, canonical: str) -> List[str]:
+        row = self.connection.execute(
+            "SELECT standard_name, synonyms FROM terms WHERE term = ? AND active = TRUE", (canonical,)
+        ).fetchone()
+        if not row:
+            return []
+        return [row["standard_name"], *json.loads(row["synonyms"] or "[]")]
 
     def clear_cache(self):
         """Clear all internal caches."""

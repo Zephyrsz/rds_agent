@@ -26,6 +26,7 @@ class SQLGenerator:
         catalog,
         semantic_layer,
         examples: Optional[List[Dict]] = None,
+        compiler=None,
     ):
         """
         初始化 SQL 生成器
@@ -40,6 +41,7 @@ class SQLGenerator:
         self.catalog = catalog
         self.semantic_layer = semantic_layer
         self.examples = examples or []
+        self.compiler = compiler
 
     def generate(self, plan_step: Any, schema_context: Dict) -> str:
         """
@@ -52,6 +54,17 @@ class SQLGenerator:
         Returns:
             SQL 字符串
         """
+        if self.compiler is not None:
+            from .semantic import SemanticQuery
+            semantic_query = getattr(plan_step, "semantic_query", None)
+            if semantic_query is None:
+                semantic_query = SemanticQuery(
+                    metrics=list(getattr(plan_step, "metrics", []) or []),
+                    dimensions=list(getattr(plan_step, "dimensions", []) or []),
+                    filters=dict(getattr(plan_step, "filters", {}) or {}),
+                )
+            return self.compiler.compile(semantic_query)
+
         # 构建提示词
         prompt = self._build_generation_prompt(plan_step, schema_context)
 

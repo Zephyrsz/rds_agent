@@ -35,7 +35,10 @@ metrics:
   avg_order_amount:
     name: 平均订单金额
     description: 平均每单金额
-    expression: AVG(order_items.net_amount)
+    expression: SUM(order_items.net_amount) / NULLIF(COUNT(DISTINCT orders.id), 0)
+    type: ratio
+    numerator: net_revenue
+    denominator: order_count
     tables:
       - orders
       - order_items

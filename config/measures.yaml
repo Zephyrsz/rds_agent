@@ -1,0 +1,38 @@
+measures:
+  net_revenue:
+    name: 净销售收入
+    expression: SUM(order_items.net_amount)
+    table: order_items
+    aggregation: sum
+    data_type: DECIMAL
+    unit: CNY
+    additive: true
+    time_additive: true
+
+  order_count:
+    name: 有效订单数
+    expression: COUNT(DISTINCT orders.id)
+    table: orders
+    aggregation: count_distinct
+    data_type: INTEGER
+    additive: false
+    time_additive: false
+
+  quantity:
+    name: 产品销量
+    expression: SUM(order_items.quantity)
+    table: order_items
+    aggregation: sum
+    data_type: INTEGER
+    unit: 件
+    additive: true
+    time_additive: true
+
+  customer_count:
+    name: 客户数
+    expression: COUNT(DISTINCT customers.id)
+    table: customers
+    aggregation: count_distinct
+    data_type: INTEGER
+    additive: false
+    time_additive: false

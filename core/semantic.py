@@ -4,11 +4,84 @@ SemanticLayer: 业务语义层
 负责将用户的业务语言映射到数据库查询语言
 """
 
+from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Any
 import yaml
 from pathlib import Path
 from datetime import datetime, timedelta
 import re
+
+
+@dataclass
+class ExampleSQL:
+    """Example query metadata shared by YAML and SQLite implementations."""
+
+    question: str
+    sql: str
+    question_type: str = ""
+    tags: List[str] = field(default_factory=list)
+    description: str = ""
+
+
+@dataclass
+class SemanticQuery:
+    """Database-independent query contract consumed by the SQL compiler."""
+
+    metrics: List[str]
+    dimensions: List[str] = field(default_factory=list)
+    filters: Dict[str, Any] = field(default_factory=dict)
+    semantic_filters: List[str] = field(default_factory=list)
+    time_range: Optional[str] = None
+    order_by: Optional[Dict[str, str]] = None
+    limit: int = 1000
+    question_type: str = "simple_query"
+
+    @classmethod
+    def from_intent(cls, intent: Dict[str, Any]) -> "SemanticQuery":
+        return cls(
+            metrics=list(intent.get("metrics", [])),
+            dimensions=list(intent.get("dimensions", [])),
+            filters=dict(intent.get("filters", {}) or {}),
+            semantic_filters=list(intent.get("semantic_filters", []) or []),
+            time_range=intent.get("time_range"),
+            order_by=intent.get("order_by"),
+            limit=int(intent.get("limit", 1000) or 1000),
+            question_type=intent.get("question_type", "simple_query"),
+        )
+
+
+@dataclass
+class DomainDefinition:
+    name: str
+    display_name: str
+    description: str = ""
+    allowed_tables: List[str] = field(default_factory=list)
+    allowed_metrics: List[str] = field(default_factory=list)
+    default_timezone: str = "Asia/Shanghai"
+    default_currency: str = "CNY"
+
+
+@dataclass
+class FilterDefinition:
+    name: str
+    display_name: str
+    expression: str
+    description: str = ""
+    applies_to: List[str] = field(default_factory=list)
+    synonyms: List[str] = field(default_factory=list)
+
+
+@dataclass
+class MeasureDefinition:
+    name: str
+    display_name: str
+    expression: str
+    table: Optional[str] = None
+    aggregation: Optional[str] = None
+    data_type: str = "DECIMAL"
+    unit: str = ""
+    additive: Optional[bool] = None
+    time_additive: Optional[bool] = None
 
 
 class MetricDefinition:
@@ -23,6 +96,18 @@ class MetricDefinition:
         tables: List[str],
         filters: Optional[List[str]] = None,
         time_column: Optional[str] = None,
+        unit: str = "",
+        data_type: str = "DECIMAL",
+        min_value: Optional[float] = None,
+        max_value: Optional[float] = None,
+        metric_type: str = "simple",
+        numerator: Optional[str] = None,
+        denominator: Optional[str] = None,
+        base_measure: Optional[str] = None,
+        comparison: Optional[str] = None,
+        format: Optional[str] = None,
+        certification: str = "draft",
+        valid_dimensions: Optional[List[str]] = None,
     ):
         self.name = name
         self.display_name = display_name
@@ -31,6 +116,18 @@ class MetricDefinition:
         self.tables = tables
         self.filters = filters or []
         self.time_column = time_column
+        self.unit = unit
+        self.data_type = data_type
+        self.min_value = min_value
+        self.max_value = max_value
+        self.metric_type = metric_type
+        self.numerator = numerator
+        self.denominator = denominator
+        self.base_measure = base_measure
+        self.comparison = comparison
+        self.format = format
+        self.certification = certification
+        self.valid_dimensions = valid_dimensions or []
 
 
 class DimensionDefinition:
@@ -43,12 +140,18 @@ class DimensionDefinition:
         table: str,
         column: str,
         mappings: Optional[Dict[str, List[str]]] = None,
+        dimension_type: str = "categorical",
+        granularities: Optional[List[str]] = None,
+        filter_column: Optional[str] = None,
     ):
         self.name = name
         self.display_name = display_name
         self.table = table
         self.column = column
         self.mappings = mappings or {}
+        self.dimension_type = dimension_type
+        self.granularities = granularities or []
+        self.filter_column = filter_column or column
 
 
 class SemanticLayer:
@@ -68,6 +171,8 @@ class SemanticLayer:
         self.dimensions: Dict[str, DimensionDefinition] = {}
         self.terms: Dict[str, str] = {}  # 业务术语 -> 标准名称
         self.synonyms: Dict[str, List[str]] = {}  # 标准名称 -> 同义词列表
+        self.filters: Dict[str, FilterDefinition] = {}
+        self.domains: Dict[str, DomainDefinition] = {}
 
         self._load_config()
 
@@ -76,6 +181,31 @@ class SemanticLayer:
         self._load_metrics()
         self._load_dimensions()
         self._load_terms()
+        self._load_phase1_objects()
+
+    def _load_phase1_objects(self):
+        filters_file = self.config_dir / "filters.yaml"
+        if filters_file.exists():
+            with open(filters_file, "r", encoding="utf-8") as f:
+                for name, item in (yaml.safe_load(f) or {}).get("filters", {}).items():
+                    self.filters[name] = FilterDefinition(
+                        name=name, display_name=item.get("name", name),
+                        expression=item.get("expression", item.get("expr", "")),
+                        description=item.get("description", ""),
+                        applies_to=item.get("applies_to", []), synonyms=item.get("synonyms", []),
+                    )
+        domains_file = self.config_dir / "domains.yaml"
+        if domains_file.exists():
+            with open(domains_file, "r", encoding="utf-8") as f:
+                for name, item in (yaml.safe_load(f) or {}).get("domains", {}).items():
+                    self.domains[name] = DomainDefinition(
+                        name=name, display_name=item.get("name", name),
+                        description=item.get("description", ""),
+                        allowed_tables=item.get("allowed_tables", []),
+                        allowed_metrics=item.get("allowed_metrics", []),
+                        default_timezone=item.get("default_timezone", "Asia/Shanghai"),
+                        default_currency=item.get("default_currency", "CNY"),
+                    )
 
     def _load_metrics(self):
         """加载指标定义"""
@@ -95,6 +225,18 @@ class SemanticLayer:
                 tables=metric_info.get("tables", []),
                 filters=metric_info.get("filters", []),
                 time_column=metric_info.get("time_column"),
+                unit=metric_info.get("unit", ""),
+                data_type=metric_info.get("data_type", "DECIMAL"),
+                min_value=metric_info.get("min_value"),
+                max_value=metric_info.get("max_value"),
+                metric_type=metric_info.get("type", metric_info.get("metric_type", "simple")),
+                numerator=metric_info.get("numerator"),
+                denominator=metric_info.get("denominator"),
+                base_measure=metric_info.get("base_measure"),
+                comparison=metric_info.get("comparison"),
+                format=metric_info.get("format"),
+                certification=metric_info.get("certification", "draft"),
+                valid_dimensions=metric_info.get("valid_dimensions", []),
             )
 
     def _load_dimensions(self):
@@ -113,6 +255,9 @@ class SemanticLayer:
                 table=dim_info.get("table", ""),
                 column=dim_info.get("column", ""),
                 mappings=dim_info.get("mappings", {}),
+                dimension_type=dim_info.get("type", dim_info.get("dimension_type", "categorical")),
+                granularities=dim_info.get("granularities", []),
+                filter_column=dim_info.get("filter_column"),
             )
 
     def _load_terms(self):
@@ -179,6 +324,32 @@ class SemanticLayer:
                 return dim
 
         return None
+
+    def get_all_metrics(self) -> List[MetricDefinition]:
+        """Return all configured metrics in stable name order."""
+        return [self.metrics[name] for name in sorted(self.metrics)]
+
+    def get_all_dimensions(self) -> List[DimensionDefinition]:
+        """Return all configured dimensions in stable name order."""
+        return [self.dimensions[name] for name in sorted(self.dimensions)]
+
+    def get_metric(self, name: str) -> Optional[MetricDefinition]:
+        return self.resolve_metric(name)
+
+    def get_dimension(self, name: str) -> Optional[DimensionDefinition]:
+        return self.resolve_dimension(name)
+
+    def resolve_filter(self, name: str) -> Optional[FilterDefinition]:
+        if name in self.filters:
+            return self.filters[name]
+        needle = name.lower()
+        for item in self.filters.values():
+            if needle in {item.name.lower(), item.display_name.lower(), *(s.lower() for s in item.synonyms)}:
+                return item
+        return None
+
+    def resolve_domain(self, name: str) -> Optional[DomainDefinition]:
+        return self.domains.get(name)
 
     def resolve_dimension_value(self, dimension_name: str, value: str) -> Optional[str]:
         """

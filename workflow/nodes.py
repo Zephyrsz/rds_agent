@@ -16,7 +16,7 @@ class WorkflowNodes:
     每个节点都是一个函数，接收状态并返回更新后的状态
     """
 
-    def __init__(self, catalog, semantic_layer, planner, generator, guard, executor, validator, composer):
+    def __init__(self, catalog, semantic_layer, planner, generator, guard, executor, validator, composer, compiler=None):
         """
         初始化工作流节点
 
@@ -38,6 +38,7 @@ class WorkflowNodes:
         self.executor = executor
         self.validator = validator
         self.composer = composer
+        self.compiler = compiler or getattr(generator, "compiler", None)
 
     def classify_request(self, state: Dict[str, Any]) -> Dict[str, Any]:
         """节点1: 分类请求"""
@@ -111,6 +112,8 @@ class WorkflowNodes:
                 "resolved_dimensions": resolved_dimensions,
                 "time_range_parsed": time_range,
             }
+            from core.semantic import SemanticQuery
+            updated_intent["semantic_query"] = SemanticQuery.from_intent(updated_intent)
 
             audit_entry = {
                 "node": "resolve_semantics",
@@ -139,12 +142,32 @@ class WorkflowNodes:
 
         try:
             question = state["question"]
+            intent = state.get("intent") or {}
+            required_tables = set()
+            for metric in intent.get("resolved_metrics", []):
+                required_tables.update(metric.get("tables", []))
+            for dimension in intent.get("resolved_dimensions", []):
+                if dimension.get("table"):
+                    required_tables.add(dimension["table"])
 
-            # 搜索相关 Schema
-            schema_context = self.catalog.search_schema(question, max_tables=5)
-
-            # 提取表名
-            relevant_tables = list(schema_context.get("tables", {}).keys())
+            if required_tables:
+                found = self.catalog.search_schema(required_tables=sorted(required_tables))
+                if isinstance(found, dict):
+                    schema_context = found
+                    relevant_tables = list(found.get("tables", {}).keys())
+                else:
+                    relevant_tables = list(found)
+                    schema_context = {"tables": {}, "joins": []}
+                    for table_name in relevant_tables:
+                        table = self.catalog.get_table(table_name)
+                        if table:
+                            schema_context["tables"][table_name] = self.catalog.get_ddl_summary(table_name)
+                    for join in self.catalog.get_join_paths(relevant_tables):
+                        schema_context["joins"].append(str(join))
+            else:
+                found = self.catalog.search_schema(question, max_tables=5)
+                schema_context = found if isinstance(found, dict) else {"tables": {}, "joins": []}
+                relevant_tables = list(schema_context.get("tables", {}).keys())
 
             audit_entry = {
                 "node": "select_schema",
@@ -226,6 +249,7 @@ class WorkflowNodes:
                 metrics=current_step.get("metrics", []),
                 dimensions=current_step.get("dimensions", []),
                 filters=current_step.get("filters", {}),
+                semantic_query=(state.get("intent") or {}).get("semantic_query"),
             )
 
             sql = self.generator.generate(step_obj, schema_context)
@@ -376,10 +400,38 @@ class WorkflowNodes:
         logger.info("Node: validate_result")
 
         try:
-            # 这里需要传入实际的对象（简化实现）
-            # 在实际使用中需要将字典转换回对象
+            from core.executor import QueryResult
+            from core.planner import QueryStep
+            from core.validator import ValidationResult
 
-            validation_issues = []  # 简化：实际应调用 validator
+            payload = state.get("query_result") or {}
+            result = QueryResult(
+                query_id=payload.get("query_id", "workflow-result"),
+                sql=payload.get("sql", state.get("sql", "")),
+                rows=payload.get("rows", []),
+                row_count=payload.get("row_count", len(payload.get("rows", []))),
+                execution_time=payload.get("execution_time", 0.0),
+                columns=payload.get("columns", []),
+                success=payload.get("success", True),
+                error=payload.get("error"),
+            )
+            plan_step = QueryStep(
+                step_id="query", purpose="执行查询并返回结果",
+                metrics=(state.get("intent") or {}).get("metrics", []),
+                dimensions=(state.get("intent") or {}).get("dimensions", []),
+                filters=(state.get("intent") or {}).get("filters", {}),
+            )
+            validation = self.validator.validate(plan_step, result)
+            if isinstance(validation, ValidationResult):
+                validation_issues = [
+                    {"severity": issue.severity, "message": issue.message, "details": issue.details}
+                    for issue in validation.issues
+                ]
+                result_validated = not validation.has_errors()
+            else:
+                # Preserve compatibility with lightweight/mock validators.
+                validation_issues = []
+                result_validated = True
 
             audit_entry = {
                 "node": "validate_result",
@@ -389,7 +441,7 @@ class WorkflowNodes:
 
             return {
                 **state,
-                "result_validated": True,
+                "result_validated": result_validated,
                 "validation_issues": validation_issues,
                 "audit_trail": state["audit_trail"] + [audit_entry],
             }
@@ -414,6 +466,11 @@ class WorkflowNodes:
                 "question": question,
                 "summary": "查询成功完成",
                 "query_result": state.get("query_result"),
+                "warnings": [
+                    f"[{issue.get('severity', 'warning').upper()}] {issue.get('message', '')}"
+                    for issue in state.get("validation_issues", [])
+                    if issue.get("severity") in {"warning", "error"}
+                ],
                 "audit_info": {
                     "total_steps": len(state["audit_trail"]),
                 },

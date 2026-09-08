@@ -12,11 +12,17 @@ Python SDK for RDS Agent
 from typing import Optional, Dict, Any, List
 from pathlib import Path
 from dataclasses import dataclass
+from datetime import date
+import os
+import tempfile
 
 import sys
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from adapters.duckdb import create_sample_database, DuckDBAdapter
+from adapters.sqlite_catalog import SQLiteCatalog
+from adapters.sqlite_semantic import SQLiteSemanticLayer
+from adapters.yaml_to_sqlite import migrate_yaml_to_sqlite
 from core import (
     DatabaseCatalog,
     SemanticLayer,
@@ -26,6 +32,7 @@ from core import (
     QueryExecutor,
     ResultValidator,
     AnswerComposer,
+    SemanticQueryCompiler,
 )
 from workflow import DataAgentWorkflow
 
@@ -83,6 +90,8 @@ class RDSAgent:
         db_path: str = ":memory:",
         llm_model: str = "gpt-4",
         llm_temperature: float = 0.0,
+        metadata_db_path: Optional[str] = None,
+        reference_date: Optional[date] = None,
     ):
         """
         初始化 RDS Agent
@@ -100,6 +109,20 @@ class RDSAgent:
 
         self.config_dir = Path(config_dir)
         self.db_path = db_path
+        self.reference_date = reference_date or (date(2024, 9, 30) if db_path == ":memory:" else None)
+        self._metadata_temp_path = None
+
+        if metadata_db_path in (None, ":memory:"):
+            fd, temp_path = tempfile.mkstemp(prefix="rds_agent_metadata_", suffix=".db")
+            os.close(fd)
+            self.metadata_db_path = temp_path
+            self._metadata_temp_path = temp_path
+        else:
+            self.metadata_db_path = str(metadata_db_path)
+
+        metadata_path = Path(self.metadata_db_path)
+        if not metadata_path.exists() or metadata_path.stat().st_size == 0:
+            migrate_yaml_to_sqlite(self.config_dir, self.metadata_db_path)
 
         # 初始化数据库
         if db_path == ":memory:" or not Path(db_path).exists():
@@ -113,21 +136,25 @@ class RDSAgent:
 
     def _init_components(self, llm_model: str, llm_temperature: float):
         """初始化核心组件"""
-        # Catalog 和 Semantic Layer
-        self.catalog = DatabaseCatalog(self.config_dir)
-        self.semantic_layer = SemanticLayer(self.config_dir)
+        # SQLite 是运行时 metadata 的唯一来源；YAML 仅在初始化时作为种子迁移。
+        self.catalog = SQLiteCatalog(self.metadata_db_path)
+        self.semantic_layer = SQLiteSemanticLayer(self.metadata_db_path, reference_date=self.reference_date)
+        self.compiler = SemanticQueryCompiler(self.semantic_layer, self.catalog)
 
         # Planner
         self.planner = QueryPlanner(self.semantic_layer, self.catalog)
 
         # LLM
-        llm = ChatOpenAI(model=llm_model, temperature=llm_temperature)
+        llm = None
+        if os.getenv("OPENAI_API_KEY"):
+            llm = ChatOpenAI(model=llm_model, temperature=llm_temperature)
 
         # Generator
         self.generator = SQLGenerator(
             llm=llm,
             catalog=self.catalog,
             semantic_layer=self.semantic_layer,
+            compiler=self.compiler,
         )
 
         # Guard
@@ -158,6 +185,7 @@ class RDSAgent:
             executor=self.executor,
             validator=self.validator,
             composer=self.composer,
+            compiler=self.compiler,
         )
 
     def query(self, question: str, user_context: Optional[Dict] = None) -> QueryResult:
@@ -172,10 +200,14 @@ class RDSAgent:
             QueryResult 对象
         """
         try:
+            context = user_context or {}
+            if context.get("reference_date"):
+                value = context["reference_date"]
+                self.semantic_layer.reference_date = date.fromisoformat(value) if isinstance(value, str) else value
             # 执行工作流
             final_state = self.workflow.run(
                 question=question,
-                user_context=user_context or {}
+                user_context=context
             )
 
             # 检查错误
@@ -227,10 +259,14 @@ class RDSAgent:
             QueryResult 对象
         """
         try:
+            context = user_context or {}
+            if context.get("reference_date"):
+                value = context["reference_date"]
+                self.semantic_layer.reference_date = date.fromisoformat(value) if isinstance(value, str) else value
             # 异步执行工作流
             final_state = await self.workflow.arun(
                 question=question,
-                user_context=user_context or {}
+                user_context=context
             )
 
             # 检查错误
@@ -292,10 +328,14 @@ class RDSAgent:
                     "columns": [
                         {
                             "name": col_name,
-                            **col_info
+                            "type": col_info.type,
+                            "description": col_info.description,
+                            "primary_key": col_info.primary_key,
+                            "foreign_key": col_info.foreign_key,
+                            "enum": col_info.enum,
                         }
                         for col_name, col_info in table.columns.items()
-                    ]
+                    ],
                 }
             else:
                 tables = self.catalog.get_all_tables()
@@ -320,7 +360,7 @@ class RDSAgent:
             指标列表
         """
         metrics = []
-        for metric_name, metric in self.semantic_layer.metrics.items():
+        for metric in self.semantic_layer.get_all_metrics():
             metrics.append({
                 "name": metric.name,
                 "display_name": metric.display_name,
@@ -338,7 +378,7 @@ class RDSAgent:
             维度列表
         """
         dimensions = []
-        for dim_name, dim in self.semantic_layer.dimensions.items():
+        for dim in self.semantic_layer.get_all_dimensions():
             dimensions.append({
                 "name": dim.name,
                 "display_name": dim.display_name,
@@ -361,6 +401,15 @@ class RDSAgent:
         """关闭数据库连接"""
         if self.db_adapter:
             self.db_adapter.close()
+        if self.catalog:
+            self.catalog.close()
+        if self.semantic_layer:
+            self.semantic_layer.close()
+        if self._metadata_temp_path:
+            try:
+                os.unlink(self._metadata_temp_path)
+            except FileNotFoundError:
+                pass
 
     def __enter__(self):
         """上下文管理器入口"""

@@ -44,7 +44,7 @@ def create_catalog(config_source: Union[Path, str]):
     # Convert to string for easier checking
     source_str = str(config_source)
 
-    if isinstance(config_source, Path) or source_str.endswith("/"):
+    if (isinstance(config_source, Path) and config_source.suffix not in {".db", ".sqlite"}) or source_str.endswith("/"):
         # YAML mode
         config_dir = Path(config_source)
         if not config_dir.exists():
@@ -104,7 +104,7 @@ def create_semantic_layer(config_source: Union[Path, str]):
     # Convert to string for easier checking
     source_str = str(config_source)
 
-    if isinstance(config_source, Path) or source_str.endswith("/"):
+    if (isinstance(config_source, Path) and config_source.suffix not in {".db", ".sqlite"}) or source_str.endswith("/"):
         # YAML mode
         config_dir = Path(config_source)
         if not config_dir.exists():
@@ -197,7 +197,7 @@ def get_config_mode(config_source: Union[Path, str]) -> str:
     """
     source_str = str(config_source)
 
-    if isinstance(config_source, Path) or source_str.endswith("/"):
+    if (isinstance(config_source, Path) and config_source.suffix not in {".db", ".sqlite"}) or source_str.endswith("/"):
         return "yaml"
     elif source_str.endswith(".db") or source_str.endswith(".sqlite"):
         return "sqlite"

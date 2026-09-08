@@ -61,6 +61,17 @@ class SQLiteCatalog:
         if schema_file.exists():
             with open(schema_file) as f:
                 self.connection.executescript(f.read())
+            additions = {
+                "tables": {"grain": "TEXT", "entities": "TEXT"},
+                "joins": {"name": "TEXT", "auto_join": "BOOLEAN DEFAULT TRUE", "priority": "INTEGER DEFAULT 100", "fan_out_risk": "BOOLEAN DEFAULT FALSE", "temporal_validity": "TEXT"},
+                "dimensions": {"dimension_type": "TEXT DEFAULT 'categorical'", "granularities": "TEXT", "filter_column": "TEXT"},
+                "metrics": {"metric_type": "TEXT DEFAULT 'simple'", "numerator": "TEXT", "denominator": "TEXT", "base_measure": "TEXT", "comparison": "TEXT", "format": "TEXT", "certification": "TEXT DEFAULT 'draft'", "valid_dimensions": "TEXT"},
+            }
+            for table, columns in additions.items():
+                existing = {row[1] for row in self.connection.execute(f"PRAGMA table_info({table})")}
+                for name, definition in columns.items():
+                    if name not in existing:
+                        self.connection.execute(f"ALTER TABLE {table} ADD COLUMN {name} {definition}")
             self.connection.commit()
 
     def get_all_tables(self) -> List[str]:
@@ -142,6 +153,8 @@ class SQLiteCatalog:
             description=table_row["description"],
             columns=columns,
             tags=json.loads(table_row["tags"]) if table_row["tags"] else [],
+            grain=table_row["grain"] if "grain" in table_row.keys() else None,
+            entities=json.loads(table_row["entities"] or "[]") if "entities" in table_row.keys() else [],
         )
 
         # Cache it
@@ -229,6 +242,11 @@ class SQLiteCatalog:
                 join_type=row["join_type"] or "INNER",
                 cardinality=row["cardinality"] or "",
                 description=row["description"] or "",
+                name=row["name"] if "name" in row.keys() else None,
+                auto_join=bool(row["auto_join"]) if "auto_join" in row.keys() else True,
+                priority=row["priority"] if "priority" in row.keys() and row["priority"] is not None else 100,
+                fan_out_risk=bool(row["fan_out_risk"]) if "fan_out_risk" in row.keys() else False,
+                temporal_validity=row["temporal_validity"] if "temporal_validity" in row.keys() else None,
             ))
 
         logger.debug(f"Found {len(join_paths)} join paths for {len(tables)} tables")
@@ -266,6 +284,11 @@ class SQLiteCatalog:
                     join_type=row["join_type"] or "INNER",
                     cardinality=row["cardinality"] or "",
                     description=row["description"] or "",
+                    name=row["name"] if "name" in row.keys() else None,
+                    auto_join=bool(row["auto_join"]) if "auto_join" in row.keys() else True,
+                    priority=row["priority"] if "priority" in row.keys() and row["priority"] is not None else 100,
+                    fan_out_risk=bool(row["fan_out_risk"]) if "fan_out_risk" in row.keys() else False,
+                    temporal_validity=row["temporal_validity"] if "temporal_validity" in row.keys() else None,
                 )
                 for row in cursor.fetchall()
             ]

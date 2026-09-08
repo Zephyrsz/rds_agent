@@ -29,6 +29,7 @@ class QueryStep:
         metrics: Optional[List[str]] = None,
         dimensions: Optional[List[str]] = None,
         filters: Optional[Dict] = None,
+        semantic_query: Optional[Any] = None,
     ):
         self.step_id = step_id
         self.purpose = purpose
@@ -37,6 +38,7 @@ class QueryStep:
         self.metrics = metrics or []
         self.dimensions = dimensions or []
         self.filters = filters or {}
+        self.semantic_query = semantic_query
         self.sql = None
         self.result = None
 
@@ -70,6 +72,7 @@ class QueryPlan:
                     "depends_on": step.depends_on,
                     "metrics": step.metrics,
                     "dimensions": step.dimensions,
+                    "semantic_query": step.semantic_query,
                 }
                 for step in self.steps
             ],
@@ -142,6 +145,8 @@ class QueryPlanner:
 
     def _create_simple_plan(self, intent: Dict) -> QueryPlan:
         """创建简单查询计划（单步查询）"""
+        from .semantic import SemanticQuery
+        semantic_query = intent.get("semantic_query") or SemanticQuery.from_intent(intent)
         step = QueryStep(
             step_id="query",
             purpose="执行查询并返回结果",
@@ -149,6 +154,7 @@ class QueryPlanner:
             metrics=intent.get("metrics", []),
             dimensions=intent.get("dimensions", []),
             filters=intent.get("filters", {}),
+            semantic_query=semantic_query,
         )
 
         return QueryPlan(

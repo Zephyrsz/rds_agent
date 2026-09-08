@@ -65,6 +65,17 @@ def migrate_yaml_to_sqlite(config_dir: Path, db_path: str):
             logger.info("Migrating examples.yaml...")
             _migrate_examples(cursor, examples_file)
 
+        # Phase 1 semantic objects. Missing files are valid for legacy configs.
+        for filename, migrator in (
+            ("domains.yaml", _migrate_domains),
+            ("measures.yaml", _migrate_measures),
+            ("filters.yaml", _migrate_filters),
+        ):
+            metadata_file = config_dir / filename
+            if metadata_file.exists():
+                logger.info("Migrating %s...", filename)
+                migrator(cursor, metadata_file)
+
         # Commit all changes
         conn.commit()
         logger.info(f"✓ Migration completed successfully: {db_path}")
@@ -84,9 +95,56 @@ def _init_schema(cursor: sqlite3.Cursor):
     if schema_sql_path.exists():
         with open(schema_sql_path) as f:
             cursor.executescript(f.read())
+        _ensure_schema_columns(cursor)
         logger.debug("Database schema initialized")
     else:
         logger.warning(f"Schema file not found: {schema_sql_path}")
+
+
+def _ensure_schema_columns(cursor: sqlite3.Cursor):
+    """Upgrade metadata databases created by the pre-Phase-1 schema."""
+    additions = {
+        "tables": {
+            "grain": "TEXT",
+            "entities": "TEXT",
+        },
+        "joins": {
+            "name": "TEXT",
+            "auto_join": "BOOLEAN DEFAULT TRUE",
+            "priority": "INTEGER DEFAULT 100",
+            "fan_out_risk": "BOOLEAN DEFAULT FALSE",
+            "temporal_validity": "TEXT",
+        },
+        "metrics": {
+            "metric_type": "TEXT DEFAULT 'simple'",
+            "numerator": "TEXT",
+            "denominator": "TEXT",
+            "base_measure": "TEXT",
+            "comparison": "TEXT",
+            "format": "TEXT",
+            "certification": "TEXT DEFAULT 'draft'",
+            "valid_dimensions": "TEXT",
+        },
+        "dimensions": {
+            "dimension_type": "TEXT DEFAULT 'categorical'",
+            "granularities": "TEXT",
+            "filter_column": "TEXT",
+        },
+        "terms": {
+            "standard_name": "TEXT",
+            "maps_to": "TEXT",
+            "exclusions": "TEXT",
+            "context": "TEXT",
+            "priority": "INTEGER DEFAULT 100",
+        },
+    }
+    for table, columns in additions.items():
+        existing = {
+            row[1] for row in cursor.execute(f"PRAGMA table_info({table})").fetchall()
+        }
+        for name, definition in columns.items():
+            if name not in existing:
+                cursor.execute(f"ALTER TABLE {table} ADD COLUMN {name} {definition}")
 
 
 def _migrate_schema(cursor: sqlite3.Cursor, schema_file: Path):
@@ -112,6 +170,15 @@ def _migrate_schema(cursor: sqlite3.Cursor, schema_file: Path):
         ))
 
         table_id = cursor.lastrowid
+
+        cursor.execute(
+            "UPDATE tables SET grain = ?, entities = ? WHERE id = ?",
+            (
+                table_config.get("grain"),
+                json.dumps(table_config.get("entities", []), ensure_ascii=False),
+                table_id,
+            ),
+        )
 
         # Insert columns
         columns = table_config.get("columns", {})
@@ -140,6 +207,25 @@ def _migrate_schema(cursor: sqlite3.Cursor, schema_file: Path):
                 json.dumps(col_config.get("enum", [])) if "enum" in col_config else None
             ))
 
+        # Keep the normalized entity rows in sync with the table seed.
+        cursor.execute("DELETE FROM entities WHERE table_name = ?", (table_name,))
+        for entity in table_config.get("entities", []) or []:
+            cursor.execute(
+                """
+                INSERT OR REPLACE INTO entities
+                  (name, table_name, entity_type, keys, expr, references_entity)
+                VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    entity.get("name", table_name),
+                    table_name,
+                    entity.get("type", "primary"),
+                    json.dumps(entity.get("keys", []), ensure_ascii=False),
+                    entity.get("expr"),
+                    entity.get("references") or entity.get("references_entity"),
+                ),
+            )
+
         logger.debug(f"  Migrated table: {table_name} ({len(columns)} columns)")
 
     # Migrate joins
@@ -152,17 +238,23 @@ def _migrate_schema(cursor: sqlite3.Cursor, schema_file: Path):
             INSERT OR REPLACE INTO joins (
                 left_table, left_column,
                 right_table, right_column,
-                join_type, cardinality, description
+                join_type, cardinality, description, name,
+                auto_join, priority, fan_out_risk, temporal_validity
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (
             left_parts[0],
             left_parts[1],
             right_parts[0],
             right_parts[1],
-            "INNER",
+            join.get("join_type", "INNER"),
             join.get("cardinality", ""),
             join.get("description", "")
+            ,join.get("name"),
+            join.get("auto_join", True),
+            join.get("priority", 100),
+            join.get("fan_out_risk", False),
+            join.get("temporal_validity"),
         ))
 
     logger.debug(f"  Migrated {len(joins_data)} joins")
@@ -184,9 +276,11 @@ def _migrate_metrics(cursor: sqlite3.Cursor, metrics_file: Path):
                 name, display_name, description,
                 expression, tables, filters,
                 time_column, unit, data_type,
-                min_value, max_value, category
+                min_value, max_value, category,
+                metric_type, numerator, denominator, base_measure,
+                comparison, format, certification, valid_dimensions
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (
             metric_name,
             metric_config.get("name", metric_name),
@@ -199,7 +293,15 @@ def _migrate_metrics(cursor: sqlite3.Cursor, metrics_file: Path):
             metric_config.get("data_type", "DECIMAL"),
             metric_config.get("min_value"),
             metric_config.get("max_value"),
-            metric_config.get("category", "")
+            metric_config.get("category", ""),
+            metric_config.get("type", metric_config.get("metric_type", "simple")),
+            metric_config.get("numerator"),
+            metric_config.get("denominator"),
+            metric_config.get("base_measure"),
+            metric_config.get("comparison"),
+            metric_config.get("format"),
+            metric_config.get("certification", "draft"),
+            json.dumps(metric_config.get("valid_dimensions", [])),
         ))
 
     logger.debug(f"  Migrated {len(metrics)} metrics")
@@ -220,16 +322,19 @@ def _migrate_dimensions(cursor: sqlite3.Cursor, dimensions_file: Path):
             INSERT OR REPLACE INTO dimensions (
                 name, display_name,
                 table_name, column_name,
-                mappings, category
+                mappings, category, dimension_type, granularities, filter_column
             )
-            VALUES (?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (
             dim_name,
             dim_config.get("name", dim_name),
             dim_config.get("table", ""),
             dim_config.get("column", ""),
             json.dumps(dim_config.get("mappings", {})),
-            dim_config.get("category", "")
+            dim_config.get("category", ""),
+            dim_config.get("type", dim_config.get("dimension_type", "categorical")),
+            json.dumps(dim_config.get("granularities", [])),
+            dim_config.get("filter_column", dim_config.get("column", "")),
         ))
 
     logger.debug(f"  Migrated {len(dimensions)} dimensions")
@@ -245,18 +350,26 @@ def _migrate_terms(cursor: sqlite3.Cursor, terms_file: Path):
         return
 
     terms = terms_data.get("terms", {})
-    for term, synonyms in terms.items():
-        if isinstance(synonyms, list):
+    for term, term_config in terms.items():
+        if isinstance(term_config, list):
+            term_config = {"synonyms": term_config}
+        if isinstance(term_config, dict):
             cursor.execute("""
                 INSERT OR REPLACE INTO terms (
-                    term, synonyms, category, description
+                    term, synonyms, category, description,
+                    standard_name, maps_to, exclusions, context, priority
                 )
-                VALUES (?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (
                 term,
-                json.dumps(synonyms),
-                "",
-                ""
+                json.dumps(term_config.get("synonyms", []), ensure_ascii=False),
+                term_config.get("category", ""),
+                term_config.get("description", ""),
+                term_config.get("standard_name", term),
+                term_config.get("maps_to"),
+                json.dumps(term_config.get("exclusions", []), ensure_ascii=False),
+                json.dumps(term_config.get("context", {}), ensure_ascii=False),
+                term_config.get("priority", 100),
             ))
 
     logger.debug(f"  Migrated {len(terms)} terms")
@@ -281,12 +394,81 @@ def _migrate_examples(cursor: sqlite3.Cursor, examples_file: Path):
         """, (
             example.get("question", ""),
             example.get("sql", ""),
-            example.get("type", ""),
+            example.get("type", example.get("intent", {}).get("question_type", "")),
             json.dumps(example.get("tags", [])),
             example.get("description", "")
         ))
 
     logger.debug(f"  Migrated {len(examples)} examples")
+
+
+def _migrate_domains(cursor: sqlite3.Cursor, domains_file: Path):
+    with open(domains_file, encoding="utf-8") as f:
+        data = yaml.safe_load(f) or {}
+    for name, item in data.get("domains", {}).items():
+        cursor.execute(
+            """
+            INSERT OR REPLACE INTO domains
+              (name, display_name, description, allowed_tables, allowed_metrics,
+               default_timezone, default_currency)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                name,
+                item.get("name", name),
+                item.get("description", ""),
+                json.dumps(item.get("allowed_tables", [])),
+                json.dumps(item.get("allowed_metrics", [])),
+                item.get("default_timezone", "Asia/Shanghai"),
+                item.get("default_currency", "CNY"),
+            ),
+        )
+
+
+def _migrate_measures(cursor: sqlite3.Cursor, measures_file: Path):
+    with open(measures_file, encoding="utf-8") as f:
+        data = yaml.safe_load(f) or {}
+    for name, item in data.get("measures", {}).items():
+        cursor.execute(
+            """
+            INSERT OR REPLACE INTO measures
+              (name, display_name, expression, table_name, aggregation,
+               data_type, unit, additive, time_additive)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                name,
+                item.get("name", name),
+                item.get("expression", ""),
+                item.get("table"),
+                item.get("aggregation"),
+                item.get("data_type", "DECIMAL"),
+                item.get("unit", ""),
+                item.get("additive"),
+                item.get("time_additive"),
+            ),
+        )
+
+
+def _migrate_filters(cursor: sqlite3.Cursor, filters_file: Path):
+    with open(filters_file, encoding="utf-8") as f:
+        data = yaml.safe_load(f) or {}
+    for name, item in data.get("filters", {}).items():
+        cursor.execute(
+            """
+            INSERT OR REPLACE INTO filters
+              (name, display_name, expression, description, applies_to, synonyms)
+            VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            (
+                name,
+                item.get("name", name),
+                item.get("expression", item.get("expr", "")),
+                item.get("description", ""),
+                json.dumps(item.get("applies_to", [])),
+                json.dumps(item.get("synonyms", []), ensure_ascii=False),
+            ),
+        )
 
 
 def export_sqlite_to_yaml(db_path: str, output_dir: Path):

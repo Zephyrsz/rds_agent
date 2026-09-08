@@ -1,0 +1,7 @@
+filters:
+  valid_order:
+    name: 有效订单
+    description: 已支付或已完成的订单
+    expression: "orders.status IN ('paid', 'completed')"
+    applies_to: [orders]
+    synonyms: [有效订单, 正常订单, 成功订单]

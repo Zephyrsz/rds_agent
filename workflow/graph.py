@@ -17,6 +17,7 @@ def create_workflow_graph(
     executor,
     validator,
     composer,
+    compiler=None,
 ) -> StateGraph:
     """
     创建 LangGraph 工作流
@@ -63,6 +64,7 @@ def create_workflow_graph(
         executor=executor,
         validator=validator,
         composer=composer,
+        compiler=compiler,
     )
 
     # 创建状态图
@@ -224,6 +226,7 @@ class DataAgentWorkflow:
         executor,
         validator,
         composer,
+        compiler=None,
     ):
         """初始化工作流"""
         self.graph = create_workflow_graph(
@@ -235,6 +238,7 @@ class DataAgentWorkflow:
             executor=executor,
             validator=validator,
             composer=composer,
+            compiler=compiler,
         )
 
         # 编译工作流

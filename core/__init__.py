@@ -20,6 +20,7 @@ from .guard import SQLGuard
 from .executor import QueryExecutor
 from .validator import ResultValidator
 from .composer import AnswerComposer
+from .compiler import SemanticQueryCompiler
 
 __all__ = [
     "DatabaseCatalog",
@@ -30,4 +31,5 @@ __all__ = [
     "QueryExecutor",
     "ResultValidator",
     "AnswerComposer",
+    "SemanticQueryCompiler",
 ]

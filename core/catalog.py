@@ -2,19 +2,48 @@
 DatabaseCatalog: 管理和检索数据库 Schema 信息
 """
 
-from typing import Dict, List, Optional, Set
+from dataclasses import dataclass
+from typing import Any, Dict, List, Optional, Set
 import yaml
 from pathlib import Path
+
+
+@dataclass
+class ColumnInfo:
+    """Normalized column metadata used by both YAML and SQLite adapters."""
+
+    type: str
+    description: str = ""
+    primary_key: bool = False
+    foreign_key: Optional[str] = None
+    enum: Optional[List[str]] = None
+
+    def get(self, key: str, default: Any = None) -> Any:
+        """Provide the mapping-style API used by the YAML catalog."""
+        return getattr(self, key, default)
+
+    def __getitem__(self, key: str) -> Any:
+        return getattr(self, key)
 
 
 class TableDefinition:
     """表定义"""
 
-    def __init__(self, name: str, description: str, columns: Dict, tags: Optional[List[str]] = None):
+    def __init__(
+        self,
+        name: str,
+        description: str,
+        columns: Dict,
+        tags: Optional[List[str]] = None,
+        grain: Optional[str] = None,
+        entities: Optional[List[Dict[str, Any]]] = None,
+    ):
         self.name = name
         self.description = description
         self.columns = columns
         self.tags = tags or []
+        self.grain = grain
+        self.entities = entities or []
 
     def get_ddl_summary(self) -> str:
         """生成表结构摘要"""
@@ -31,11 +60,41 @@ class TableDefinition:
 class JoinPath:
     """Join 路径定义"""
 
-    def __init__(self, left: str, right: str, cardinality: str, description: str):
+    def __init__(
+        self,
+        left: Optional[str] = None,
+        right: Optional[str] = None,
+        cardinality: str = "many_to_one",
+        description: str = "",
+        *,
+        left_table: Optional[str] = None,
+        left_column: Optional[str] = None,
+        right_table: Optional[str] = None,
+        right_column: Optional[str] = None,
+        join_type: str = "INNER",
+        name: Optional[str] = None,
+        auto_join: bool = True,
+        priority: int = 100,
+        fan_out_risk: bool = False,
+        temporal_validity: Optional[str] = None,
+    ):
+        if left is None and left_table and left_column:
+            left = f"{left_table}.{left_column}"
+        if right is None and right_table and right_column:
+            right = f"{right_table}.{right_column}"
+        if not left or not right:
+            raise ValueError("JoinPath requires left/right column references")
+
         self.left = left  # e.g., "orders.customer_id"
         self.right = right  # e.g., "customers.id"
         self.cardinality = cardinality  # one_to_one, many_to_one, one_to_many, many_to_many
         self.description = description
+        self.join_type = join_type.upper()
+        self.name = name or f"{left}_to_{right}".replace(".", "_")
+        self.auto_join = auto_join
+        self.priority = priority
+        self.fan_out_risk = fan_out_risk
+        self.temporal_validity = temporal_validity
 
         # 解析表名
         self.left_table = left.split('.')[0]
@@ -76,7 +135,9 @@ class DatabaseCatalog:
                 name=table_name,
                 description=table_info.get("description", ""),
                 columns=table_info.get("columns", {}),
-                tags=table_info.get("tags", [])
+                tags=table_info.get("tags", []),
+                grain=table_info.get("grain"),
+                entities=table_info.get("entities", []),
             )
 
         # 加载 Join 关系
@@ -85,7 +146,13 @@ class DatabaseCatalog:
                 left=join_info["left"],
                 right=join_info["right"],
                 cardinality=join_info.get("cardinality", "many_to_one"),
-                description=join_info.get("description", "")
+                description=join_info.get("description", ""),
+                join_type=join_info.get("join_type", "INNER"),
+                name=join_info.get("name"),
+                auto_join=join_info.get("auto_join", True),
+                priority=join_info.get("priority", 100),
+                fan_out_risk=join_info.get("fan_out_risk", False),
+                temporal_validity=join_info.get("temporal_validity"),
             )
             self.joins.append(join_path)
 

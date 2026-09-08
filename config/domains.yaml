@@ -1,0 +1,8 @@
+domains:
+  retail_sales:
+    name: 零售销售
+    description: 中国区线上及线下零售销售分析
+    allowed_tables: [orders, order_items, customers, regions, products]
+    allowed_metrics: [sales_amount, order_count, customer_count, avg_order_amount, product_sales, gmv]
+    default_timezone: Asia/Shanghai
+    default_currency: CNY
