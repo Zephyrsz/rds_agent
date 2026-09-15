@@ -70,6 +70,7 @@ Natural language -> SemanticQuery -> SemanticQueryCompiler
 - [语义层与 API 参考](docs/reference/semantic-layer-api.md)
 - [Phase 0-2 路线图](docs/roadmap/phase-0-2.md)
 - [SQLite metadata 生命周期](docs/guides/metadata-lifecycle.md)
+- [共享运行时部署与启动](docs/deployment.md)
 - [外部集成指南](docs/guides/integrations.md)
 - [变更记录](docs/changelog.md)
 - [历史文档归档](docs/archive/README.md)
