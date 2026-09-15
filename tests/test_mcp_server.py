@@ -8,6 +8,7 @@ from mcp.shared.memory import create_connected_server_and_client_session
 from mcp.types import TextContent
 
 from integration.mcp_server import create_mcp_server
+from integration.mcp_server import _parse_args
 
 
 @dataclass
@@ -88,3 +89,11 @@ async def test_query_failure_is_an_mcp_tool_error():
     assert len(result.content) == 1
     assert isinstance(result.content[0], TextContent)
     assert "query rejected by SQL policy" in result.content[0].text
+
+
+def test_mcp_parser_reads_shared_metadata_path(monkeypatch):
+    import sys
+
+    monkeypatch.setenv("RDS_METADATA_DB_PATH", "/tmp/shared-metadata.db")
+    monkeypatch.setattr(sys, "argv", ["mcp_server"])
+    assert _parse_args().metadata_db_path == "/tmp/shared-metadata.db"

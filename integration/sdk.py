@@ -92,6 +92,7 @@ class RDSAgent:
         llm_temperature: float = 0.0,
         metadata_db_path: Optional[str] = None,
         reference_date: Optional[date] = None,
+        read_only: bool = True,
     ):
         """
         初始化 RDS Agent
@@ -99,6 +100,8 @@ class RDSAgent:
         Args:
             config_dir: 配置文件目录（默认为项目 config 目录）
             db_path: 数据库路径（默认内存数据库）
+            metadata_db_path: 共享 SQLite metadata 路径
+            read_only: 是否以只读模式连接已有 DuckDB 文件
             llm_model: LLM 模型名称
             llm_temperature: LLM 温度参数
         """
@@ -109,6 +112,7 @@ class RDSAgent:
 
         self.config_dir = Path(config_dir)
         self.db_path = db_path
+        self.read_only = read_only
         self.reference_date = reference_date or (date(2024, 9, 30) if db_path == ":memory:" else None)
         self._metadata_temp_path = None
 
@@ -125,10 +129,12 @@ class RDSAgent:
             migrate_yaml_to_sqlite(self.config_dir, self.metadata_db_path)
 
         # 初始化数据库
-        if db_path == ":memory:" or not Path(db_path).exists():
+        if db_path == ":memory:":
             self.db_adapter = create_sample_database(db_path)
+        elif not Path(db_path).exists():
+            raise FileNotFoundError(f"DuckDB database not found: {db_path}")
         else:
-            self.db_adapter = DuckDBAdapter(db_path)
+            self.db_adapter = DuckDBAdapter(db_path, read_only=read_only)
             self.db_adapter.connect()
 
         # 初始化核心组件

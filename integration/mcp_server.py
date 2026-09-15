@@ -85,6 +85,7 @@ def _parse_args() -> argparse.Namespace:
         default=Path(os.environ.get("RDS_CONFIG_DIR", Path(__file__).parent.parent / "config")),
     )
     parser.add_argument("--db-path", default=os.environ.get("RDS_DB_PATH", ":memory:"))
+    parser.add_argument("--metadata-db-path", default=os.environ.get("RDS_METADATA_DB_PATH"))
     parser.add_argument("--llm-model", default=os.environ.get("RDS_LLM_MODEL", "gpt-4"))
     return parser.parse_args()
 
@@ -97,6 +98,8 @@ def main() -> None:
     with RDSAgent(
         config_dir=args.config_dir,
         db_path=args.db_path,
+        metadata_db_path=args.metadata_db_path,
+        read_only=True,
         llm_model=args.llm_model,
     ) as agent:
         create_mcp_server(agent.query).run(transport="stdio")

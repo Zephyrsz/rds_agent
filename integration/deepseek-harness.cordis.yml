@@ -13,5 +13,6 @@
           OPENAI_API_BASE: !!js process.env.RDS_LLM_BASE_URL || process.env.DEEPSEEK_BASE_URL || 'https://api.deepseek.com'
           RDS_LLM_MODEL: !!js process.env.RDS_LLM_MODEL || 'deepseek-chat'
           RDS_DB_PATH: !!js process.env.RDS_DB_PATH || ':memory:'
+          RDS_METADATA_DB_PATH: !!js process.env.RDS_METADATA_DB_PATH || process.env.RDS_AGENT_METADATA_DB
         toolCallTimeoutMs: 120000
         failOnStartupError: true

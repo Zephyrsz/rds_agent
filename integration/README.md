@@ -36,7 +36,7 @@ cd /Users/rgwei/pj/pj_agent/deepseek-harness
 pnpm dsh --profile web --patch "$RDS_AGENT_ROOT/integration/deepseek-harness.cordis.yml"
 ```
 
-Harness 将工具注册为 `mcp__rds__query_data`。配置默认连接 DeepSeek API 并使用 `deepseek-chat`；可通过 `RDS_LLM_API_KEY`、`RDS_LLM_BASE_URL`、`RDS_LLM_MODEL` 和 `RDS_DB_PATH` 覆盖。省略 `RDS_DB_PATH` 时使用内存示例数据库。
+Harness 将工具注册为 `mcp__rds__query_data`。配置默认连接 DeepSeek API 并使用 `deepseek-chat`；可通过 `RDS_LLM_API_KEY`、`RDS_LLM_BASE_URL`、`RDS_LLM_MODEL`、`RDS_DB_PATH` 和 `RDS_METADATA_DB_PATH` 覆盖。生产环境应将 `RDS_DB_PATH` 指向 DuckDB Tools 的共享文件，并将 `RDS_METADATA_DB_PATH` 指向共享 SQLite metadata；RDS Agent 会以只读模式连接已有 DuckDB。省略 `RDS_DB_PATH` 时使用内存示例数据库。
 
 ### 2. RESTful API
 

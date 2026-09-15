@@ -20,3 +20,20 @@ def test_query_returns_structured_failure_when_workflow_has_no_result():
 
     assert result.success is False
     assert result.error == "工作流未返回查询结果"
+
+
+def test_existing_database_connections_are_read_only(monkeypatch, tmp_path):
+    import duckdb
+
+    database = tmp_path / "shared.duckdb"
+    connection = duckdb.connect(str(database))
+    connection.execute("CREATE TABLE facts (value INTEGER)")
+    connection.close()
+
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    agent = RDSAgent.__new__(RDSAgent)
+    agent.db_path = str(database)
+    agent.db_adapter = __import__("adapters.duckdb", fromlist=["DuckDBAdapter"]).DuckDBAdapter(str(database), read_only=True)
+    agent.db_adapter.connect()
+    assert agent.db_adapter.read_only is True
+    agent.db_adapter.close()
