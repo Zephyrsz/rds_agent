@@ -9,6 +9,12 @@ source_revision: d612543 plus working-tree changes
 
 本文件只记录用户或运维可见的变化。实现过程、旧方案和完整分析保留在 `docs/archive/`，不在此重复。
 
+## Unreleased - 2026-09-16
+
+### Added
+
+- 新增 AWS Oregon 远程部署架构文档和 `/app/rds_agent/start.sh` 统一服务入口。
+
 ## Unreleased - 2026-09-04
 
 ### Added

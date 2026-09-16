@@ -20,6 +20,7 @@ source_revision: d612543 plus working-tree changes
 | [Phase 0-2 路线图](roadmap/phase-0-2.md) | Feature/roadmap | 当前阶段的实施范围、验收标准和状态 |
 | [Metadata 生命周期](guides/metadata-lifecycle.md) | Operations guide | YAML seed、SQLite 迁移、持久化和发布注意事项 |
 | [外部集成指南](guides/integrations.md) | Integration guide | SDK、MCP、REST、Function Calling、LangChain 和 Harness |
+| [AWS Oregon 远程部署](remote-deployment.md) | Operations guide | 三个服务的架构、启动顺序、配置和统一运维入口 |
 | [变更记录](changelog.md) | Changelog | 用户和运维可见的版本变化 |
 | [Phase 0-2 快照](releases/2026-09-04-phase-0-2.md) | Release snapshot | 当前工作树对应的可审查交付快照 |
 
