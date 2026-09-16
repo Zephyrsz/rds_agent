@@ -1,5 +1,6 @@
 """Protocol tests for the RDS Agent MCP adapter."""
 
+from argparse import Namespace
 from dataclasses import dataclass, field
 from datetime import timedelta
 
@@ -7,8 +8,8 @@ import pytest
 from mcp.shared.memory import create_connected_server_and_client_session
 from mcp.types import TextContent
 
-from integration.mcp_server import create_mcp_server
-from integration.mcp_server import _parse_args
+from integration import mcp_server
+from integration.mcp_server import _parse_args, create_mcp_server
 
 
 @dataclass
@@ -97,3 +98,50 @@ def test_mcp_parser_reads_shared_metadata_path(monkeypatch):
     monkeypatch.setenv("RDS_METADATA_DB_PATH", "/tmp/shared-metadata.db")
     monkeypatch.setattr(sys, "argv", ["mcp_server"])
     assert _parse_args().metadata_db_path == "/tmp/shared-metadata.db"
+
+
+def test_request_scoped_query_closes_agent_after_each_call(monkeypatch, tmp_path):
+    events = []
+
+    class TrackingAgent:
+        def __init__(self, **kwargs):
+            events.append(("created", kwargs))
+
+        def __enter__(self):
+            events.append(("entered", None))
+            return self
+
+        def query(self, question):
+            events.append(("queried", question))
+            return StubQueryResult(success=True, question=question)
+
+        def __exit__(self, exc_type, exc_val, exc_tb):
+            events.append(("closed", None))
+
+    monkeypatch.setattr(mcp_server, "RDSAgent", TrackingAgent)
+    args = Namespace(
+        config_dir=tmp_path / "config",
+        db_path=str(tmp_path / "workspace.duckdb"),
+        metadata_db_path=str(tmp_path / "metadata.db"),
+        llm_model="deepseek-chat",
+    )
+
+    query = mcp_server.create_request_scoped_query(args)
+    result = query("sales today")
+
+    assert result.question == "sales today"
+    assert events == [
+        (
+            "created",
+            {
+                "config_dir": args.config_dir,
+                "db_path": args.db_path,
+                "metadata_db_path": args.metadata_db_path,
+                "read_only": True,
+                "llm_model": "deepseek-chat",
+            },
+        ),
+        ("entered", None),
+        ("queried", "sales today"),
+        ("closed", None),
+    ]

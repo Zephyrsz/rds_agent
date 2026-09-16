@@ -90,19 +90,28 @@ def _parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
+def create_request_scoped_query(args: argparse.Namespace) -> Query:
+    """Create a query callable that releases the shared DuckDB after each request."""
+
+    def query(question: str) -> QueryResultLike:
+        with RDSAgent(
+            config_dir=args.config_dir,
+            db_path=args.db_path,
+            metadata_db_path=args.metadata_db_path,
+            read_only=True,
+            llm_model=args.llm_model,
+        ) as agent:
+            return agent.query(question)
+
+    return query
+
+
 def main() -> None:
     """Run the MCP server on stdin/stdout until the client disconnects."""
     # MCP stdio reserves stdout for JSON-RPC frames; route workflow logs to stderr.
     structlog.configure(logger_factory=structlog.PrintLoggerFactory(file=sys.stderr))
     args = _parse_args()
-    with RDSAgent(
-        config_dir=args.config_dir,
-        db_path=args.db_path,
-        metadata_db_path=args.metadata_db_path,
-        read_only=True,
-        llm_model=args.llm_model,
-    ) as agent:
-        create_mcp_server(agent.query).run(transport="stdio")
+    create_mcp_server(create_request_scoped_query(args)).run(transport="stdio")
 
 
 if __name__ == "__main__":
