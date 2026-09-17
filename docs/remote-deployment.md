@@ -53,6 +53,7 @@ RDS Agent 的 MCP 服务按请求打开和关闭 DuckDB，只读连接。这样 
 | DuckDB Tools API | `0.0.0.0:8001` |
 | DuckDB Tools 前端 | `0.0.0.0:5175` |
 | Harness | `127.0.0.1:3090` |
+| Nginx 统一入口 | `0.0.0.0:80` |
 
 统一配置文件是 `/app/rds_agent/config/remote-stack.env`。DeepSeek key 放在未纳入 Git 的 `/app/rds_agent/config/remote-secrets.env`，权限应为 `600`。
 
@@ -109,7 +110,28 @@ Harness 页面需要 token；未带 token 时返回 `401` 属于正常行为。�
 /app/rds_agent/logs/remote/harness.log
 ```
 
-## 5. 首次配置
+## 5. Nginx 统一入口
+
+远程服务器使用 `deploy/nginx/rds-stack.conf` 配置 Nginx，并将服务设为开机启动。路由如下：
+
+```text
+http://<server>/          -> http://127.0.0.1:3090       (DeepSeek Harness)
+http://<server>/admin/    -> http://127.0.0.1:5175       (DuckDB Tools 前端)
+http://<server>/admin/api/ -> http://127.0.0.1:8001/api/ (DuckDB Tools API)
+http://<server>/api/       -> http://127.0.0.1:3090/api/ (DeepSeek Harness API)
+```
+
+安装或更新配置后执行：
+
+```bash
+sudo nginx -t
+sudo systemctl enable nginx
+sudo systemctl reload nginx
+```
+
+Harness 仍只监听 `127.0.0.1:3090`，公网访问统一通过 Nginx 的 80 端口；未携带 Harness token 时根路径返回 `401` 属于正常行为。`VITE_API_URL=/admin/api` 必须随 DuckDB Tools 前端启动环境生效，避免其业务 API 与 Harness 的 `/api/` 路由冲突。
+
+## 6. 首次配置
 
 ```bash
 cd /app/rds_agent
@@ -126,9 +148,9 @@ RDS_LLM_API_KEY=your-deepseek-api-key
 
 不要将 `remote-secrets.env` 提交到 Git。启动前确认统一配置中的 `DUCKDB_TOOLS_DATABASE`、`RDS_DB_PATH` 和 `RDS_METADATA_DB_PATH` 指向同一组共享文件。
 
-## 6. 数据和语义层流程
+## 7. 数据和语义层流程
 
-1. 访问 `http://<服务器地址>:5175`。
+1. 访问 `http://<服务器地址>/admin/`。
 2. 在 DuckDB Tools 导入 CSV/XLSX。
 3. 执行语义扫描，编辑和校验自动生成的草稿。
 4. 发布语义层，写入 `metadata.db`。
@@ -136,10 +158,11 @@ RDS_LLM_API_KEY=your-deepseek-api-key
 
 RDS Agent 不会从 YAML 覆盖已有 SQLite metadata；SQLite 是运行时语义层的来源。
 
-## 7. 故障排查
+## 8. 故障排查
 
 - `workspace.duckdb` 不存在：执行 `./start.sh start`，脚本会先初始化写端数据库。
 - Harness 启动失败：检查 `remote-secrets.env`、Harness 日志和 `/app/deepseek-harness` 依赖。
 - `/api/database` 出现 DuckDB lock：确认没有正在执行的 Agent 查询，等待查询结束后重试。
 - 端口冲突：检查 `ss -ltnp`，并修改 `remote-stack.env` 中的端口。
-- Harness 外部访问：它只监听 `127.0.0.1`，使用 SSH 隧道，例如 `ssh -L 3090:127.0.0.1:3090 ubuntu@54.70.213.240`。
+- Nginx 访问失败：执行 `sudo nginx -t`，检查 `systemctl status nginx` 和 `ss -ltnp | grep ':80'`。
+- Harness 外部访问：通过 `http://<服务器地址>/` 访问；它仍只监听 `127.0.0.1:3090`，也可使用 SSH 隧道，例如 `ssh -L 3090:127.0.0.1:3090 ubuntu@54.70.213.240`。
