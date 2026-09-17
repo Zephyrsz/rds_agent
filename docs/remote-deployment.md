@@ -22,7 +22,7 @@ source_revision: f922ca8 plus remote deployment configuration
                        ├── 写入 /app/rds_agent/data/workspace.duckdb
                        └── 发布 /app/rds_agent/data/metadata.db
 
-DeepSeek Harness :8091（仅监听 127.0.0.1）
+DeepSeek Harness :3090（仅监听 127.0.0.1）
   │ stdio MCP 子进程
   ▼
 RDS Agent MCP Server
@@ -52,7 +52,7 @@ RDS Agent 的 MCP 服务按请求打开和关闭 DuckDB，只读连接。这样 
 | 共享 SQLite metadata | `/app/rds_agent/data/metadata.db` |
 | DuckDB Tools API | `0.0.0.0:8001` |
 | DuckDB Tools 前端 | `0.0.0.0:5175` |
-| Harness | `127.0.0.1:8091` |
+| Harness | `127.0.0.1:3090` |
 
 统一配置文件是 `/app/rds_agent/config/remote-stack.env`。DeepSeek key 放在未纳入 Git 的 `/app/rds_agent/config/remote-secrets.env`，权限应为 `600`。
 
@@ -63,7 +63,7 @@ RDS Agent 的 MCP 服务按请求打开和关闭 DuckDB，只读连接。这样 
 1. `remote-service.sh start` 初始化共享 DuckDB 文件，并启动 FastAPI 后端 `8001`。
 2. 等待 `/api/health` 成功后启动 Vite 前端 `5175`。
 3. 检查共享 DuckDB 和 SQLite 文件存在。
-4. 启动 DeepSeek Harness `8091`，加载 `deepseek-harness.remote.cordis.yml`。
+4. 启动 DeepSeek Harness `3090`，加载 `deepseek-harness.remote.cordis.yml`。
 5. Harness 启动 MCP stdio 子进程，指向 `/home/ubuntu/venv_314/bin/python -m integration.mcp_server`。
 6. `status` 输出三个服务的 PID、端口和共享路径。
 
@@ -98,7 +98,7 @@ cd /app/rds_agent
 ```bash
 curl http://127.0.0.1:8001/api/health
 curl -I http://127.0.0.1:5175/
-curl -I http://127.0.0.1:8091/
+curl -I http://127.0.0.1:3090/
 ```
 
 Harness 页面需要 token；未带 token 时返回 `401` 属于正常行为。日志位置：
@@ -142,4 +142,4 @@ RDS Agent 不会从 YAML 覆盖已有 SQLite metadata；SQLite 是运行时语�
 - Harness 启动失败：检查 `remote-secrets.env`、Harness 日志和 `/app/deepseek-harness` 依赖。
 - `/api/database` 出现 DuckDB lock：确认没有正在执行的 Agent 查询，等待查询结束后重试。
 - 端口冲突：检查 `ss -ltnp`，并修改 `remote-stack.env` 中的端口。
-- Harness 外部访问：它只监听 `127.0.0.1`，使用 SSH 隧道，例如 `ssh -L 8091:127.0.0.1:8091 ubuntu@54.70.213.240`。
+- Harness 外部访问：它只监听 `127.0.0.1`，使用 SSH 隧道，例如 `ssh -L 3090:127.0.0.1:3090 ubuntu@54.70.213.240`。
