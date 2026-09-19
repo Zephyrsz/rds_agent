@@ -129,7 +129,7 @@ sudo systemctl enable nginx
 sudo systemctl reload nginx
 ```
 
-Harness 仍只监听 `127.0.0.1:3090`，公网访问统一通过 Nginx 的 80 端口；未携带 Harness token 时根路径返回 `401` 属于正常行为。`VITE_API_URL=/admin/api` 必须随 DuckDB Tools 前端启动环境生效，避免其业务 API 与 Harness 的 `/api/` 路由冲突。
+Harness 仍只监听 `127.0.0.1:3090`，公网访问统一通过 Nginx 的 80 端口。`HARNESS_TRUSTED_HOST` 必须配置为浏览器看到的公网 authority（本部署为 `54.70.213.240`，不带 `:3090`），否则页面虽然能登录，后续 `/api/*` 请求会返回 `403 forbidden`。未携带 Harness token 时根路径返回 `401` 属于正常行为。`VITE_API_URL=/admin/api` 必须随 DuckDB Tools 前端启动环境生效，避免其业务 API 与 Harness 的 `/api/` 路由冲突。
 
 ## 6. 首次配置
 
