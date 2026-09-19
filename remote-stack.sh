@@ -20,6 +20,8 @@ LOG_DIR="$RDS_AGENT_ROOT/logs/remote"
 HARNESS_PID_FILE="$RUN_DIR/harness.pid"
 HARNESS_LOG="$LOG_DIR/harness.log"
 mkdir -p "$RUN_DIR" "$LOG_DIR" "$RDS_AGENT_ROOT/data"
+HARNESS_WORKSPACE_ROOT="${HARNESS_WORKSPACE_ROOT:-$RDS_AGENT_ROOT/workspace}"
+mkdir -p "$HARNESS_WORKSPACE_ROOT"
 
 pid_alive() {
   local file="$1" pid
@@ -56,7 +58,9 @@ start_harness() {
   if [[ -n "${HARNESS_TRUSTED_HOST:-}" ]]; then
     args+=(--trusted-host "$HARNESS_TRUSTED_HOST")
   fi
-  nohup setsid npm "${args[@]}" >"$HARNESS_LOG" 2>&1 </dev/null &
+  # Keep the repository cwd for monorepo module resolution while making the
+  # configured workspace the directory picker's default Home.
+  HOME="$HARNESS_WORKSPACE_ROOT" nohup setsid npm "${args[@]}" >"$HARNESS_LOG" 2>&1 </dev/null &
   echo "$!" > "$HARNESS_PID_FILE"
   for _ in {1..120}; do
     kill -0 "$!" 2>/dev/null || { tail -n 60 "$HARNESS_LOG" >&2 || true; exit 1; }

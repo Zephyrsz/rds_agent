@@ -47,6 +47,7 @@ RDS Agent 的 MCP 服务按请求打开和关闭 DuckDB，只读连接。这样 
 | RDS Agent | `/app/rds_agent` |
 | DuckDB Tools | `/app/duckdb_tools` |
 | DeepSeek Harness | `/app/deepseek-harness` |
+| Harness 默认工作区 Home | `/app/rds_agent/workspace` |
 | Python | `/home/ubuntu/venv_314/bin/python` |
 | 共享 DuckDB | `/app/rds_agent/data/workspace.duckdb` |
 | 共享 SQLite metadata | `/app/rds_agent/data/metadata.db` |
@@ -129,7 +130,7 @@ sudo systemctl enable nginx
 sudo systemctl reload nginx
 ```
 
-Harness 仍只监听 `127.0.0.1:3090`，公网访问统一通过 Nginx 的 80 端口。`HARNESS_TRUSTED_HOST` 必须配置为浏览器看到的公网 authority（本部署为 `54.70.213.240`，不带 `:3090`），否则页面虽然能登录，后续 `/api/*` 请求会返回 `403 forbidden`。未携带 Harness token 时根路径返回 `401` 属于正常行为。`VITE_API_URL=/admin/api` 必须随 DuckDB Tools 前端启动环境生效，避免其业务 API 与 Harness 的 `/api/` 路由冲突。
+Harness 仍只监听 `127.0.0.1:3090`，公网访问统一通过 Nginx 的 80 端口。`HARNESS_WORKSPACE_ROOT` 和 Harness 进程的 `HOME` 当前配置为 `/app/rds_agent/workspace`，因此目录选择器打开时以该目录作为 Home。当前 Harness 版本的 browse picker 没有部署级浏览根限制，用户仍可能通过面包屑跳到上级目录；如果需要禁止越界，需要在 Harness 的目录浏览插件中增加路径边界校验。`HARNESS_TRUSTED_HOST` 必须配置为浏览器看到的公网 authority（本部署为 `54.70.213.240`，不带 `:3090`），否则页面虽然能登录，后续 `/api/*` 请求会返回 `403 forbidden`。未携带 Harness token 时根路径返回 `401` 属于正常行为。`VITE_API_URL=/admin/api` 必须随 DuckDB Tools 前端启动环境生效，避免其业务 API 与 Harness 的 `/api/` 路由冲突。
 
 ## 6. 首次配置
 
